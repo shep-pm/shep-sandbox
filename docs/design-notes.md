@@ -57,11 +57,13 @@ crabpot has no daemon. A `Sandbox` lives in the process that started the command
 - A file under the profile made after the profile read grant stays unreadable to the sandbox until the grant runs again.
 - The Windows sandbox refuses session 0, so a shepherd running as a service cannot start one. It has to run in the user's desktop session.
 
-## Open questions
+## Settled on 2026-10-30
 
-1. Does the `crabpot` CLI forward shep's stop and reload signals to its child, on every platform?
-2. On Windows, a forced kill of the launcher skips `Drop`, so its grants stay behind. crabpot's `crates/crabpot/src/windows/held.rs` suggests it tracks grants it could not revoke. Check whether a later start cleans them up.
-3. Where does a sheep's sandbox settings file live, and is it per sheep or shared presets?
-4. How do violations reach shep: the launcher's stderr, or a structured channel?
-5. Does the agent-policy layer (idea 1) land before shep-sandbox, so a plain service can opt out of agent defaults?
-6. Does shep-sandbox start as a shep design issue, a crabpot ADR, or both?
+Parity shipped in the meantime, so neither idea waits on it now. The six open questions were answered, and the effort moved to a wayfinder map on this repository's issues, which holds every decision from here on.
+
+1. Signals: on Unix the `crabpot` launcher forwards SIGINT and SIGTERM, and the Linux helper also SIGHUP and SIGQUIT. shep sends its stop signal to the sheep's whole process group. bwrap's `--new-session` keeps that group signal off the command on Linux; on macOS the command gets it twice, from shep and from the launcher. A SIGQUIT or SIGUSR2 stop kills the launcher on its default action (shep-pm/crabpot#283).
+2. Windows grants: srt-win reaps a dead holder's grants on every `acl` call, so the next sandbox start cleans up after a killed launcher.
+3. Settings: a path per sheep, and presets are files the dog ships.
+4. Violations: the launcher's stderr, which already lands in the sheep's log, for v1.
+5. Idea 1 does not block shep-sandbox. It is built when a real service hits one of the agent denies.
+6. A wayfinder map in this repository, with shep and crabpot tickets hanging off it. macOS and Linux first; Windows waits on a desktop-session story for the shepherd.
