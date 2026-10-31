@@ -12,9 +12,11 @@
 mod config;
 mod error;
 
-use std::process::ExitCode;
+use std::{ffi::OsString, process::ExitCode};
 
 use shep_client::dogs::{self, DogAction, DogIdentity, DogRuntime, Probe, Stop, Subcommand, Verb};
+
+use shep_client::shep_core::dogs::{DOG_LINK_FD_VAR, DOG_LINK_PIPE_VAR};
 
 use crate::{config::Section, error::Error};
 
@@ -49,7 +51,7 @@ async fn main() -> ExitCode {
         .answer::<Section>();
 
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if let [first] = args.as_slice()
+    if let Some(first) = args.first()
         && VERBS.iter().any(|(name, _)| name == first)
     {
         eprintln!("shep-sandbox: `{first}` is not built yet");
@@ -65,19 +67,33 @@ async fn main() -> ExitCode {
     }
 }
 
+/// Whether the shepherd handed this process a connection, which it does only
+/// to a dog it supervises. `shep <name>` sets `$SHEP_DOG_NAME` and no link.
+fn is_supervised(var: &dyn Fn(&str) -> Option<OsString>) -> bool {
+    var(DOG_LINK_FD_VAR).is_some() || var(DOG_LINK_PIPE_VAR).is_some()
+}
+
 /// Idle as an adopted dog until the shepherd stops it.
 async fn run(args: &[String]) -> Result<(), Error> {
-    match dogs::parse_args(DEFAULT_NAME, args.iter().map(String::as_str))? {
+    let identity = DogIdentity::from_env(&|key| std::env::var(key).ok(), DEFAULT_NAME);
+    let section = identity.section();
+    match dogs::parse_args(section, args.iter().map(String::as_str))? {
         DogAction::Run => {}
         DogAction::PrintConfig => {
-            println!("# The [{DEFAULT_NAME}] section has no keys yet.");
+            println!("# The [{section}] section has no keys yet.");
             return Ok(());
         }
     }
 
+    let named = identity.handshake().is_some();
+    if named && !is_supervised(&|key| std::env::var_os(key)) {
+        return Err(Error::Bare {
+            verbs: VERBS.map(|(name, _)| name),
+        });
+    }
+
     let mut stop = Stop::on_stop_signals();
     let paths = dogs::resolve_paths(&|key| std::env::var_os(key))?;
-    let identity = DogIdentity::from_env(&|key| std::env::var(key).ok(), DEFAULT_NAME);
     let runtime = DogRuntime::start(identity, paths).await?;
     let _: Section = runtime.config()?;
 

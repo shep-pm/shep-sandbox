@@ -16,6 +16,12 @@ pub enum Error {
     Shepherd(ShepherdError),
     /// The `[sandbox]` section of `dogs.toml` has a key the dog does not have.
     Config(SectionError),
+    /// `shep <name>` ran the dog with no subcommand: named by the shepherd,
+    /// but holding no connection to it, so not the supervised dog.
+    Bare {
+        /// The subcommands the dog has, for the usage line.
+        verbs: [&'static str; 2],
+    },
 }
 
 impl Error {
@@ -26,6 +32,7 @@ impl Error {
             Self::Home(err) => err.exit_code(),
             Self::Shepherd(err) => err.exit_code(),
             Self::Config(err) => err.exit_code(),
+            Self::Bare { .. } => shep_client::shep_core::exit::USAGE,
         }
     }
 }
@@ -37,6 +44,7 @@ impl fmt::Display for Error {
             Self::Home(err) => err.fmt(f),
             Self::Shepherd(err) => err.fmt(f),
             Self::Config(err) => err.fmt(f),
+            Self::Bare { verbs } => write!(f, "takes a subcommand: {}", verbs.join(", ")),
         }
     }
 }
@@ -48,6 +56,7 @@ impl core::error::Error for Error {
             Self::Home(err) => Some(err),
             Self::Shepherd(err) => Some(err),
             Self::Config(err) => Some(err),
+            Self::Bare { .. } => None,
         }
     }
 }

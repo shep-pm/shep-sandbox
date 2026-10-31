@@ -12,14 +12,25 @@ use shep_client::shep_core::{
 const DOG_BIN: &str = env!("CARGO_BIN_EXE_shep-sandbox");
 
 fn run(args: &[&str]) -> Output {
-    Command::new(DOG_BIN)
+    // A probe must not need a shepherd, and `shep adopt` asks these of a
+    // candidate it cannot name yet.
+    run_named(None, args)
+}
+
+/// Run as `shep <name> <args>` does: named by `$SHEP_DOG_NAME`, and with no
+/// connection to a shepherd handed down, which only a supervised dog has.
+fn run_named(name: Option<&str>, args: &[&str]) -> Output {
+    let mut command = Command::new(DOG_BIN);
+    command
         .args(args)
-        // A probe must not need a shepherd, and `shep adopt` asks these of a
-        // candidate it cannot name yet.
-        .env_remove("SHEP_DOG_NAME")
-        .env("SHEP_HOME", "/nonexistent/shep-home")
-        .output()
-        .expect("the dog binary ran")
+        .env_remove("SHEP_DOG_FD")
+        .env_remove("SHEP_DOG_PIPE")
+        .env("SHEP_HOME", "/nonexistent/shep-home");
+    match name {
+        Some(name) => command.env("SHEP_DOG_NAME", name),
+        None => command.env_remove("SHEP_DOG_NAME"),
+    };
+    command.output().expect("the dog binary ran")
 }
 
 fn stdout(output: &Output) -> String {
@@ -94,4 +105,52 @@ fn run_by_hand_with_no_shepherd_the_dog_says_why_it_stopped() {
 
     assert!(!output.status.success());
     assert!(!output.stderr.is_empty());
+}
+
+#[test]
+fn a_verb_with_more_arguments_is_still_not_built_yet() {
+    for args in [&["doctor", "--verbose"][..], &["init", "foo"][..]] {
+        let output = run(args);
+
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("not built yet"),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn shep_sandbox_with_no_subcommand_prints_usage_and_exits_2() {
+    // `shep sandbox` names the dog without handing it a connection, so it is
+    // not the supervised dog and must not connect as one.
+    let output = run_named(Some("sandbox"), &[]);
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("init") && stderr.contains("doctor"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn print_config_names_the_section_the_dog_was_adopted_under() {
+    let output = run_named(Some("crab"), &["--print-config"]);
+
+    assert!(output.status.success());
+    assert!(stdout(&output).contains("[crab]"), "{}", stdout(&output));
+}
+
+#[test]
+fn a_refused_argument_names_the_dog_it_was_adopted_as() {
+    let output = run_named(Some("crab"), &["--bogus"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("crab does not understand --bogus"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

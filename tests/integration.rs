@@ -17,7 +17,7 @@ use std::{
     fs,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
     time::{Duration, Instant},
 };
 
@@ -128,7 +128,7 @@ impl Drop for Shepherd {
 }
 
 /// Poll `ready` until it answers true, or fail naming `what`.
-fn wait_until(what: &str, ready: impl Fn() -> bool) {
+fn wait_until(what: &str, mut ready: impl FnMut() -> bool) {
     let deadline = Instant::now() + PATIENCE;
     while Instant::now() < deadline {
         if ready() {
@@ -199,4 +199,31 @@ fn shep_help_lists_the_dog_with_its_manifest_description() {
         help.contains("Run a shep sheep inside a crabpot sandbox"),
         "{help}"
     );
+}
+
+#[test]
+fn shep_sandbox_with_no_subcommand_exits_2_beside_a_running_shepherd() {
+    let shepherd = Shepherd::new();
+    shepherd.boot();
+    shepherd.adopt_dog();
+    wait_until("the dog's handshake", || {
+        shepherd.dog()["handshook"] == true
+    });
+
+    let mut child = shepherd
+        .command()
+        .arg("sandbox")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("shep ran");
+    let mut status = None;
+    // A dog that connected as the adopted one would wait here for a stop.
+    wait_until("`shep sandbox` to exit", || {
+        status = child.try_wait().expect("exit status");
+        status.is_some()
+    });
+    let _ = child.kill();
+
+    assert_eq!(status.and_then(|status| status.code()), Some(2));
 }
