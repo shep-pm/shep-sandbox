@@ -14,7 +14,31 @@ keywords = ["shep"]
 # a published .crate, which is permanent.
 exclude = ["/docs/"]
 
+[features]
+# Option: builds the tests that drive a real shepherd. Off by default because
+# they need a `shep` binary at `$SHEP_BIN`, which a fresh clone lacks.
+integration = []
+
 [dependencies]
+# 0.17.0 is the first release whose `Probe` answers the manifest flag and
+# carries a `Verb`, which `shep sandbox` needs. 0.19.0 is the shep this dog
+# is tested against. `schema` answers `--schema`.
+shep-client = { version = "0.19.0", default-features = false, features = ["schema"] }
+# `#[derive(JsonSchema)]` expands to absolute `schemars::` paths, so the crate
+# has to be nameable here even though shep-client already carries it.
+schemars = { version = "1.2.2", default-features = false, features = ["derive", "std"] }
+serde = { version = "1", default-features = false, features = ["derive"] }
+tokio = { version = "1", default-features = false, features = ["rt", "macros"] }
+
+[dev-dependencies]
+# Only to read the manifest and the schema the probes print.
+serde_json = { version = "1", default-features = false, features = ["std"] }
+# Only to give each integration test its own $SHEP_HOME.
+tempfile = { version = "3", default-features = false }
+
+[[test]]
+name = "integration"
+required-features = ["integration"]
 
 [lints.rust]
 missing_docs = "deny"
