@@ -33,6 +33,16 @@ fn run_named(name: Option<&str>, args: &[&str]) -> Output {
     command.output().expect("the dog binary ran")
 }
 
+fn run_in(dir: &std::path::Path, args: &[&str]) -> Output {
+    Command::new(DOG_BIN)
+        .args(args)
+        .current_dir(dir)
+        .env_remove("SHEP_DOG_NAME")
+        .env("SHEP_HOME", "/nonexistent/shep-home")
+        .output()
+        .expect("the dog binary ran")
+}
+
 fn stdout(output: &Output) -> String {
     String::from_utf8(output.stdout.clone()).expect("stdout is UTF-8")
 }
@@ -79,16 +89,40 @@ fn the_manifest_declares_the_sandbox_verb_with_init_and_doctor() {
 
 #[test]
 fn a_verb_that_is_not_built_yet_says_so_and_exits_2() {
-    for verb in ["init", "doctor"] {
-        let output = run(&[verb]);
+    let output = run(&["doctor"]);
 
-        assert_eq!(output.status.code(), Some(2), "{verb}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("not built yet"),
-            "{verb}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("not built yet"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn init_writes_the_skeleton_where_the_path_says_and_will_not_overwrite_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("sandbox.json");
+
+    let first = run_in(dir.path(), &["init", target.to_str().unwrap()]);
+    let second = run_in(dir.path(), &["init", target.to_str().unwrap()]);
+
+    assert!(first.status.success(), "{first:?}");
+    let written: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&target).unwrap()).expect("JSON");
+    assert!(written["filesystem"]["allowWrite"].is_array());
+    assert_eq!(second.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&second.stderr).contains("already exists"));
+}
+
+#[test]
+fn init_with_no_path_writes_sandbox_json_in_the_current_directory() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let output = run_in(dir.path(), &["init"]);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(dir.path().join("sandbox.json").is_file());
 }
 
 #[test]
@@ -109,16 +143,14 @@ fn run_by_hand_with_no_shepherd_the_dog_says_why_it_stopped() {
 
 #[test]
 fn a_verb_with_more_arguments_is_still_not_built_yet() {
-    for args in [&["doctor", "--verbose"][..], &["init", "foo"][..]] {
-        let output = run(args);
+    let output = run(&["doctor", "--verbose"]);
 
-        assert_eq!(output.status.code(), Some(2), "{args:?}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("not built yet"),
-            "{args:?}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("not built yet"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

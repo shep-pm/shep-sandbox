@@ -1,0 +1,51 @@
+{
+  "// sandbox.json": [
+    "Settings for crabpot, which runs a sheep inside a sandbox: crabpot -s sandbox.json -- <command>.",
+    "crabpot reads plain JSON and drops every key it does not know, so each key that starts with // is a comment.",
+    "A path may be absolute, start with ~ for the home folder, or be relative to the sheep's cwd. Globs such as ** and * are allowed.",
+    "Delete a comment once you have read it; nothing else depends on it."
+  ],
+  "filesystem": {
+    "// allowWrite": [
+      "Paths the sheep may write, beside the default write roots crabpot sets.",
+      "The default, \".\", is the sheep's cwd. Everything else stays read-only.",
+      "Example: [\".\", \"~/.cache/my-tool\", \"/var/data/shared\"]"
+    ],
+    "allowWrite": ["."],
+    "// denyRead": [
+      "Paths the sheep may not read, even where the rest of the disk is readable.",
+      "Example: [\"~/.ssh\", \"~/.aws\", \"/etc/shadow\", \"**/.env\"]"
+    ],
+    "denyRead": [],
+    "// denyWrite": [
+      "Paths the sheep may not write, even inside allowWrite. A deny beats an allow.",
+      "Example: [\".git/hooks\", \".env\", \"**/*.pem\"]"
+    ],
+    "denyWrite": []
+  },
+  "network": {
+    "// allowedDomains": [
+      "Hosts the sheep may reach over HTTP and HTTPS, each with an optional :port. A leading *. matches subdomains.",
+      "An empty list means no network at all. A bare * is refused.",
+      "Example: [\"github.com\", \"*.crates.io\", \"api.example.com:8443\"]"
+    ],
+    "allowedDomains": [],
+    "// deniedDomains": [
+      "Hosts the sheep may not reach. A deny beats allowedDomains, so it carves an exception out of a wildcard.",
+      "Example: [\"uploads.github.com\"]"
+    ],
+    "deniedDomains": [],
+    "// publish": [
+      "Addresses the sheep may listen on, as address:port with an IP literal and a port from 1 to 65535, so the host can reach a service sheep.",
+      "crabpot applies it on macOS and refuses a non-empty list on Linux and Windows for now.",
+      "Example: [\"127.0.0.1:8001\", \"0.0.0.0:3600\"]"
+    ],
+    "publish": [],
+    "// allowTcp": [
+      "Hosts the sheep may dial directly over TCP, as host:port, for a service that does not speak HTTP such as a database.",
+      "A host is a DNS name or an IP literal. crabpot refuses a non-empty list wherever it cannot apply the key yet, which is every platform today.",
+      "Example: [\"10.0.0.5:3306\", \"db.internal:5432\"]"
+    ],
+    "allowTcp": []
+  }
+}

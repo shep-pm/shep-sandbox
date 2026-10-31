@@ -168,16 +168,31 @@ fn a_verb_reaches_the_binary_through_shep_and_exits_2() {
     let shepherd = Shepherd::new();
     shepherd.adopt_dog();
 
-    for verb in ["init", "doctor"] {
-        let output = shepherd
-            .command()
-            .args(["sandbox", verb])
-            .output()
-            .expect("shep ran");
+    let output = shepherd
+        .command()
+        .args(["sandbox", "doctor"])
+        .output()
+        .expect("shep ran");
 
-        assert_eq!(output.status.code(), Some(2), "{verb}: {}", stderr(&output));
-        assert!(stderr(&output).contains("not built yet"), "{verb}");
-    }
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert!(stderr(&output).contains("not built yet"));
+}
+
+#[test]
+fn init_reaches_the_binary_through_shep_and_writes_the_file() {
+    let shepherd = Shepherd::new();
+    shepherd.adopt_dog();
+    let dir = tempfile::tempdir().expect("a temp dir");
+
+    let output = shepherd
+        .command()
+        .current_dir(dir.path())
+        .args(["sandbox", "init"])
+        .output()
+        .expect("shep ran");
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(dir.path().join("sandbox.json").is_file());
 }
 
 #[test]
