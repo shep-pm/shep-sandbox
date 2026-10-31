@@ -40,9 +40,9 @@ pub struct Observed {
 impl Observed {
     /// Sort `sockets` into listeners and dials.
     ///
-    /// A connection whose local port is a listener's was accepted, not
-    /// dialed. A dial to a loopback address on one of the sheep's own
-    /// listener ports is the sheep talking to itself.
+    /// A connection whose local end a listener serves was accepted, not
+    /// dialed. A dial to a loopback address that one of the sheep's own
+    /// listeners serves is the sheep talking to itself.
     pub fn from_sockets(sockets: &[Socket]) -> Self {
         let listening: BTreeSet<SocketAddr> = sockets
             .iter()
@@ -51,14 +51,14 @@ impl Observed {
                 Socket::Connected { .. } => None,
             })
             .collect();
-        let own_port = |port| listening.iter().any(|addr| addr.port() == port);
+        let served = |addr: &SocketAddr| listening.iter().any(|own| serves(own, addr));
 
         let mut observed = Self::default();
         for socket in sockets {
             let Socket::Connected { local, remote } = socket else {
                 continue;
             };
-            if own_port(local.port()) || (remote.ip().is_loopback() && own_port(remote.port())) {
+            if served(local) || (remote.ip().is_loopback() && served(remote)) {
                 continue;
             }
             if remote.port() == HTTPS_PORT {
@@ -70,6 +70,16 @@ impl Observed {
         observed.listening = listening;
         observed
     }
+}
+
+/// Whether a connection to or from `addr` is one the listener `own` takes.
+///
+/// A wildcard listener takes every address of its family. `[::]` takes both
+/// families, as a dual-stack socket does.
+fn serves(own: &SocketAddr, addr: &SocketAddr) -> bool {
+    own.port() == addr.port()
+        && (own.ip() == addr.ip()
+            || (own.ip().is_unspecified() && (own.is_ipv6() || addr.is_ipv4())))
 }
 
 /// Why a sheep's sockets could not be read.

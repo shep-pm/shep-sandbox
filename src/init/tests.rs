@@ -339,10 +339,50 @@ mod classify {
             Socket::Listening(addr("0.0.0.0:8080")),
             connected("127.0.0.1:50001", "127.0.0.1:8080"),
             connected("127.0.0.1:8080", "127.0.0.1:50001"),
-            connected("[::1]:50002", "[::1]:8080"),
         ]);
 
         assert!(observed.dials.is_empty(), "{observed:?}");
+    }
+
+    #[test]
+    fn a_dual_stack_listener_is_dialed_over_either_loopback() {
+        let observed = Observed::from_sockets(&[
+            Socket::Listening(addr("[::]:8080")),
+            connected("[::1]:50002", "[::1]:8080"),
+            connected("127.0.0.1:50003", "127.0.0.1:8080"),
+        ]);
+
+        assert!(observed.dials.is_empty(), "{observed:?}");
+    }
+
+    #[test]
+    fn a_loopback_dial_to_the_same_port_on_another_loopback_address_is_kept() {
+        let observed = Observed::from_sockets(&[
+            Socket::Listening(addr("127.0.0.1:6379")),
+            connected("127.0.0.2:50001", "127.0.0.2:6379"),
+        ]);
+
+        assert_eq!(observed.dials, set(&["127.0.0.2:6379"]));
+    }
+
+    #[test]
+    fn a_connection_on_another_address_at_a_listener_port_is_a_dial() {
+        let observed = Observed::from_sockets(&[
+            Socket::Listening(addr("127.0.0.1:6379")),
+            connected("10.0.0.15:6379", "10.0.0.5:51000"),
+        ]);
+
+        assert_eq!(observed.dials, set(&["10.0.0.5:51000"]));
+    }
+
+    #[test]
+    fn an_ipv4_wildcard_listener_does_not_serve_ipv6_loopback() {
+        let observed = Observed::from_sockets(&[
+            Socket::Listening(addr("0.0.0.0:8080")),
+            connected("[::1]:50002", "[::1]:8080"),
+        ]);
+
+        assert_eq!(observed.dials, set(&["[::1]:8080"]));
     }
 
     #[test]
