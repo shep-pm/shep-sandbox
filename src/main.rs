@@ -13,9 +13,18 @@ mod config;
 mod error;
 mod init;
 
-use std::{ffi::OsString, path::Path, process::ExitCode};
+use std::{
+    ffi::OsString,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
-use shep_client::dogs::{self, DogAction, DogIdentity, DogRuntime, Probe, Stop, Subcommand, Verb};
+use shep_client::{
+    Client,
+    dogs::{
+        self, DogAction, DogIdentity, DogRuntime, Probe, ShepherdError, Stop, Subcommand, Verb,
+    },
+};
 
 use shep_client::shep_core::dogs::{DOG_LINK_FD_VAR, DOG_LINK_PIPE_VAR};
 
@@ -60,7 +69,7 @@ async fn main() -> ExitCode {
             eprintln!("shep-sandbox: `{NOT_BUILT_VERB}` is not built yet");
             return ExitCode::from(NOT_BUILT);
         }
-        Some("init") => return init_verb(&args[1..]),
+        Some("init") => return init_verb(&args[1..]).await,
         _ => {}
     }
 
@@ -75,18 +84,33 @@ async fn main() -> ExitCode {
 
 /// Write the settings file `shep sandbox init` asks for, in the current
 /// directory unless the path says otherwise.
-fn init_verb(args: &[String]) -> ExitCode {
-    match init::run(Path::new("."), args) {
+async fn init_verb(args: &[String]) -> ExitCode {
+    match init_file(args).await {
         Ok(path) => {
             println!("wrote {}", path.display());
             ExitCode::SUCCESS
         }
         Err(err) => {
-            let err = Error::from(err);
             eprintln!("shep-sandbox: {err}");
             ExitCode::from(err.exit_code())
         }
     }
+}
+
+/// Look up the sheep `--from` names, when it does, then write the file.
+async fn init_file(args: &[String]) -> Result<PathBuf, Error> {
+    let args = init::parse(args)?;
+    let taken = match args.from() {
+        Some(sheep) => {
+            let paths = dogs::resolve_paths(&|key| std::env::var_os(key))?;
+            let client = Client::connect(&paths.socket)
+                .await
+                .map_err(|err| init::Error::Shepherd(ShepherdError::Connect(err)))?;
+            Some(init::take(&client, sheep).await?)
+        }
+        None => None,
+    };
+    Ok(init::run(Path::new("."), &args, taken.as_ref())?)
 }
 
 /// Whether the shepherd handed this process a connection, which it does only

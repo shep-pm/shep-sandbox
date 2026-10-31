@@ -126,6 +126,26 @@ fn init_with_no_path_writes_sandbox_json_in_the_current_directory() {
 }
 
 #[test]
+fn init_from_a_sheep_with_no_shepherd_writes_nothing_and_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let output = run_in(dir.path(), &["init", "--from", "web"]);
+
+    assert_eq!(output.status.code(), Some(5), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot reach the shepherd"));
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn init_with_from_and_no_sheep_is_a_usage_error() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let output = run_in(dir.path(), &["init", "--from"]);
+
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+}
+
+#[test]
 fn an_argument_the_dog_has_never_had_is_refused() {
     let output = run(&["--rotate-now"]);
 

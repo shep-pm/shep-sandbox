@@ -242,3 +242,83 @@ fn shep_sandbox_with_no_subcommand_exits_2_beside_a_running_shepherd() {
 
     assert_eq!(status.and_then(|status| status.code()), Some(2));
 }
+
+/// A TCP port nothing holds right now.
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("a free port")
+        .local_addr()
+        .expect("its address")
+        .port()
+}
+
+#[test]
+fn init_from_a_running_sheep_publishes_what_it_listens_on_and_opens_its_cwd() {
+    let shepherd = Shepherd::new();
+    shepherd.adopt_dog();
+    let cwd = tempfile::tempdir().expect("a cwd for the sheep");
+    let cwd = cwd.path().canonicalize().expect("a canonical cwd");
+    let port = free_port();
+    // Not `exec`: the listener is a child of the sheep, as a wrapped service is.
+    let serve = shepherd.home.path().join("serve.sh");
+    fs::write(
+        &serve,
+        format!("#!/bin/sh\npython3 -m http.server {port} --bind 127.0.0.1\n"),
+    )
+    .expect("serve script");
+    fs::set_permissions(&serve, fs::Permissions::from_mode(0o755)).expect("chmod");
+    shepherd.ok(&[
+        "start",
+        serve.to_str().expect("script path"),
+        "--name",
+        "svc",
+        "--cwd",
+        cwd.to_str().expect("cwd path"),
+        "--style",
+        "bare",
+    ]);
+    wait_until("the sheep to listen", || {
+        std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
+    });
+    let dir = tempfile::tempdir().expect("a temp dir");
+
+    let output = shepherd
+        .command()
+        .current_dir(dir.path())
+        .args(["sandbox", "init", "--from", "svc"])
+        .output()
+        .expect("shep ran");
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let written: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(dir.path().join("sandbox.json")).unwrap())
+            .expect("JSON");
+    assert_eq!(
+        written["network"]["publish"],
+        serde_json::json!([format!("127.0.0.1:{port}")])
+    );
+    assert_eq!(
+        written["filesystem"]["allowWrite"],
+        serde_json::json!([cwd.to_str().unwrap()])
+    );
+}
+
+#[test]
+fn init_from_a_sheep_that_is_stopped_is_refused_by_name() {
+    let shepherd = Shepherd::new();
+    shepherd.boot();
+    shepherd.ok(&["stop", "idle", "--style", "bare"]);
+    shepherd.adopt_dog();
+    let dir = tempfile::tempdir().expect("a temp dir");
+
+    let output = shepherd
+        .command()
+        .current_dir(dir.path())
+        .args(["sandbox", "init", "--from", "idle"])
+        .output()
+        .expect("shep ran");
+
+    assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
+    assert!(stderr(&output).contains("idle is not running"));
+    assert!(!dir.path().join("sandbox.json").exists());
+}

@@ -39,6 +39,8 @@ impl Error {
             Self::Init(init::Error::Usage { .. }) | Self::Bare { .. } => {
                 shep_client::shep_core::exit::USAGE
             }
+            Self::Init(init::Error::UnknownSheep { .. }) => shep_client::shep_core::exit::NOT_FOUND,
+            Self::Init(init::Error::Shepherd(err)) => err.exit_code(),
             Self::Init(_) => shep_client::shep_core::exit::FAILURE,
         }
     }
