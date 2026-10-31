@@ -15,10 +15,13 @@ const ESTABLISHED: &str = "01";
 /// The sockets of `pids`, read from `/proc`.
 pub fn read(pids: &[u32]) -> Result<Vec<Socket>, Error> {
     let mut inodes = HashSet::new();
-    for pid in pids {
+    for (at, pid) in pids.iter().enumerate() {
         let dir = format!("/proc/{pid}/fd");
         let entries = match fs::read_dir(&dir) {
             Ok(entries) => entries,
+            Err(err) if err.kind() == io::ErrorKind::NotFound && at == 0 => {
+                return Err(Error::Gone);
+            }
             // A child that exited since the shepherd listed it.
             Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
             Err(source) => return Err(Error::Proc { path: dir, source }),
@@ -42,7 +45,8 @@ pub fn read(pids: &[u32]) -> Result<Vec<Socket>, Error> {
         match fs::read_to_string(&path) {
             Ok(text) => sockets.extend(self::sockets(&text, v6, &inodes)),
             // No IPv6 on this host.
-            Err(err) if v6 && err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) if err.kind() == io::ErrorKind::NotFound && !v6 => return Err(Error::Gone),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
             Err(source) => return Err(Error::Proc { path, source }),
         }
     }

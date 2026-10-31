@@ -95,6 +95,8 @@ pub enum Error {
     },
     /// `lsof` could not be run or exited with an error.
     Lsof(String),
+    /// The sheep's own process exited before its sockets were read.
+    Gone,
     /// Neither `/proc` nor `lsof` is how this platform reports sockets.
     Unsupported,
 }
@@ -104,6 +106,7 @@ impl fmt::Display for Error {
         match self {
             Self::Proc { path, source } => write!(f, "could not read {path}: {source}"),
             Self::Lsof(why) => write!(f, "lsof failed: {why}"),
+            Self::Gone => f.write_str("the process exited before its sockets were read"),
             Self::Unsupported => f.write_str("reading a sheep's sockets needs Linux or macOS"),
         }
     }
@@ -113,7 +116,7 @@ impl core::error::Error for Error {
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
             Self::Proc { source, .. } => Some(source),
-            Self::Lsof(_) | Self::Unsupported => None,
+            Self::Lsof(_) | Self::Gone | Self::Unsupported => None,
         }
     }
 }

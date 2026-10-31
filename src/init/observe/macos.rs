@@ -14,14 +14,40 @@ pub fn read(pids: &[u32]) -> Result<Vec<Socket>, Error> {
         .args(["-a", "-p", &list.join(","), "-i", "-n", "-P"])
         .output()
         .map_err(|err| Error::Lsof(err.to_string()))?;
-    // lsof exits 1 with nothing on stdout when no process has a socket.
-    if output.status.code() != Some(0)
-        && !(output.status.code() == Some(1) && output.stdout.is_empty())
-    {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(Error::Lsof(format!("{}: {}", output.status, stderr.trim())));
+    let sockets = sockets_of(
+        output.status.code(),
+        &String::from_utf8_lossy(&output.stdout),
+        &String::from_utf8_lossy(&output.stderr),
+    )?;
+    // No rows reads the same for a sheep with no sockets and for pids that
+    // no longer exist.
+    if sockets.is_empty() && pids.first().is_some_and(|pid| !alive(*pid)) {
+        return Err(Error::Gone);
     }
-    Ok(parse(&String::from_utf8_lossy(&output.stdout)))
+    Ok(sockets)
+}
+
+/// Whether a process with `pid` exists. Assumed so when `ps` cannot be run.
+fn alive(pid: u32) -> bool {
+    Command::new("ps")
+        .args(["-p", &pid.to_string()])
+        .output()
+        .map_or(true, |output| output.status.success())
+}
+
+/// The sockets in what `lsof` printed, given how it exited.
+///
+/// It exits 1 when any listed pid holds no internet socket, with the other
+/// pids' rows on stdout, or with none at all when no pid holds one.
+pub fn sockets_of(code: Option<i32>, stdout: &str, stderr: &str) -> Result<Vec<Socket>, Error> {
+    match code {
+        Some(0 | 1) => Ok(parse(stdout)),
+        Some(code) => Err(Error::Lsof(format!(
+            "exit status {code}: {}",
+            stderr.trim()
+        ))),
+        None => Err(Error::Lsof(format!("ended by a signal: {}", stderr.trim()))),
+    }
 }
 
 /// The listening and established TCP rows of `lsof -i -n -P` output.
@@ -70,5 +96,6 @@ fn address(text: &str, v6: bool) -> Option<SocketAddr> {
         };
         return Some(SocketAddr::new(ip, port.parse().ok()?));
     }
-    text.parse().ok()
+    let addr: SocketAddr = text.parse().ok()?;
+    Some(SocketAddr::new(addr.ip().to_canonical(), addr.port()))
 }

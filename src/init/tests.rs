@@ -227,6 +227,25 @@ mod linux {
     }
 
     #[test]
+    fn both_ends_of_a_loopback_connection_are_read_from_their_rows() {
+        let sockets = linux::sockets(TCP, false, &held(&[40004, 40005]));
+
+        assert_eq!(
+            sockets,
+            [
+                Socket::Connected {
+                    local: addr("127.0.0.1:50001"),
+                    remote: addr("127.0.0.1:8080"),
+                },
+                Socket::Connected {
+                    local: addr("127.0.0.1:8080"),
+                    remote: addr("127.0.0.1:50001"),
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn only_sockets_the_sheep_holds_are_read() {
         let sockets = linux::sockets(TCP, false, &held(&[40001]));
 
@@ -494,6 +513,52 @@ helper  41002  rin   10u  IPv4 0x6b1c2a5e7d3f53a0      0t0  TCP 127.0.0.1:6379 (
     }
 
     #[test]
+    fn an_ipv4_mapped_address_reads_as_ipv4() {
+        let sockets = macos::parse(
+            "node 41001 rin 28u IPv6 0x6b1c2a5e7d3f4f60 0t0 TCP \
+             [::ffff:127.0.0.1]:50001->[::ffff:127.0.0.1]:8080 (ESTABLISHED)\n",
+        );
+
+        assert_eq!(
+            sockets,
+            [Socket::Connected {
+                local: addr("127.0.0.1:50001"),
+                remote: addr("127.0.0.1:8080"),
+            }]
+        );
+    }
+
+    #[test]
+    fn exit_1_with_rows_is_the_sockets_of_the_pids_that_have_any() {
+        // lsof exits 1 when any listed pid holds no internet socket.
+        let sockets = macos::sockets_of(Some(1), LSOF, "").unwrap();
+
+        assert_eq!(sockets, macos::parse(LSOF));
+    }
+
+    #[test]
+    fn exit_0_is_the_sockets() {
+        assert_eq!(macos::sockets_of(Some(0), LSOF, "").unwrap().len(), 8);
+    }
+
+    #[test]
+    fn exit_1_with_no_rows_is_no_sockets() {
+        assert_eq!(macos::sockets_of(Some(1), "", "").unwrap(), []);
+    }
+
+    #[test]
+    fn any_other_exit_is_a_failure_that_says_why() {
+        let err = macos::sockets_of(Some(2), "", "lsof: illegal option\n").unwrap_err();
+
+        assert!(err.to_string().contains("illegal option"), "{err}");
+    }
+
+    #[test]
+    fn a_signal_is_a_failure() {
+        assert!(macos::sockets_of(None, "", "").is_err());
+    }
+
+    #[test]
     fn no_output_is_no_sockets() {
         assert_eq!(macos::parse(""), []);
     }
@@ -614,6 +679,30 @@ mod lookup {
         ];
 
         assert_eq!(running("web", &flock).unwrap().id, 2);
+    }
+}
+
+mod exited {
+    use super::{super::observe, Error};
+
+    #[test]
+    fn a_process_that_exited_before_its_sockets_were_read_is_not_running() {
+        let err = Error::observed(observe::Error::Gone, "web");
+
+        assert!(
+            matches!(&err, Error::NotRunning { sheep } if sheep == "web"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn any_other_read_failure_stays_a_read_failure() {
+        let err = Error::observed(observe::Error::Unsupported, "web");
+
+        assert!(
+            matches!(err, Error::Observe(observe::Error::Unsupported)),
+            "{err}"
+        );
     }
 }
 

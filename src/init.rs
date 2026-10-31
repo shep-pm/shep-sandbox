@@ -111,6 +111,19 @@ impl core::error::Error for Error {
     }
 }
 
+impl Error {
+    /// A failed read of `sheep`'s sockets. A process that exited since the
+    /// shepherd listed it is a sheep that is not running.
+    fn observed(err: observe::Error, sheep: &str) -> Self {
+        match err {
+            observe::Error::Gone => Self::NotRunning {
+                sheep: sheep.to_owned(),
+            },
+            err => Self::Observe(err),
+        }
+    }
+}
+
 /// What `shep sandbox init` was asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Args {
@@ -244,7 +257,7 @@ pub async fn take(client: &Client, name: &str) -> Result<Taken, Error> {
         other => return Err(unexpected("SheepConfig", &other)),
     };
 
-    let sockets = observe::sockets(&pids).map_err(Error::Observe)?;
+    let sockets = observe::sockets(&pids).map_err(|err| Error::observed(err, name))?;
     Ok(Taken::new(name, pid, cwd, &sockets))
 }
 
