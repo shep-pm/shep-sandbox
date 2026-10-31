@@ -247,13 +247,14 @@ fn sheep_check(env: &dyn Env, sheep: &SandboxedSheep) -> Check {
             fail(
                 format!("settings file {} does not exist", settings.display()),
                 format!(
-                    "Create it, for example:\nshep sandbox init {}",
+                    "Create it, for example:\necho '{{}}' > {}",
                     settings.display()
                 ),
             ),
         );
     }
-    let command = crabpot_in(&settings, Some(&sheep.cwd), &["true"]);
+    // crabpot runs in `cwd`, so a relative path is passed as written.
+    let command = crabpot_in(&sheep.settings, Some(&sheep.cwd), &["true"]);
     let status = match env.run(&command) {
         Ok(output) if output.code == Some(0) => {
             Status::Pass(format!("{} loads", settings.display()))

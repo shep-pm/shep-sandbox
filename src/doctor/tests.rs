@@ -421,10 +421,7 @@ fn a_sheep_whose_settings_crabpot_loads_passes() {
     let mut fake = Fake::linux();
     fake.sheep("web", "sandbox.json", "/srv/web");
     fake.file("/srv/web/sandbox.json", "{}");
-    fake.reply(
-        "crabpot -s /srv/web/sandbox.json -- true",
-        Reply::Exit(0, ""),
-    );
+    fake.reply("crabpot -s sandbox.json -- true", Reply::Exit(0, ""));
 
     let report = run(&fake);
 
@@ -445,7 +442,20 @@ fn a_sheep_with_no_settings_file_fails_with_how_to_make_one() {
         panic!("not failed: {report}");
     };
     assert!(detail.contains("/etc/web.json does not exist"));
-    assert!(fix.contains("shep sandbox init /etc/web.json"));
+    assert!(fix.contains("echo '{}' > /etc/web.json"));
+    assert!(!fix.contains("shep sandbox init"), "init is not built yet");
+}
+
+#[test]
+fn a_relative_cwd_is_not_applied_twice_to_a_relative_settings_path() {
+    let mut fake = Fake::linux();
+    fake.sheep("web", "sandbox.json", "srv/web");
+    fake.file("srv/web/sandbox.json", "{}");
+    fake.reply("crabpot -s sandbox.json -- true", Reply::Exit(0, ""));
+
+    let report = run(&fake);
+
+    assert!(is_pass(&report, "sheep web"), "{report}");
 }
 
 #[test]
