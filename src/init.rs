@@ -282,14 +282,54 @@ fn unexpected(asked: &'static str, answer: &Response) -> Error {
 /// when it cannot be created.
 pub fn run(dir: &Path, args: &Args, taken: Option<&Taken>) -> Result<PathBuf, Error> {
     let path = dir.join(args.path.as_deref().unwrap_or(DEFAULT_PATH));
-    let text = taken.map_or_else(|| SKELETON.to_owned(), render);
+    let text = taken.map_or_else(|| SKELETON.to_owned(), |taken| render(taken, Applies::HOST));
     create(&path, |file| file.write_all(text.as_bytes()))?;
     Ok(path)
 }
 
+/// Which network keys the host's crabpot applies. It refuses a non-empty list
+/// for a key it does not, so init writes what it saw for such a key into a
+/// comment instead.
+#[derive(Debug, Clone, Copy)]
+struct Applies {
+    publish: bool,
+    allow_tcp: bool,
+}
+
+impl Applies {
+    /// crabpot v0.10.0 applies `publish` on macOS and Linux and `allowTcp` on
+    /// Linux only. `init` describes the host it runs on, so this is fixed at
+    /// compile time.
+    const HOST: Self = Self {
+        publish: cfg!(any(target_os = "linux", target_os = "macos")),
+        allow_tcp: cfg!(target_os = "linux"),
+    };
+}
+
+/// A `"//"` key holding `intro` and then `lines`, after a comma, or nothing
+/// when there are no `lines`.
+fn comment<'a>(
+    key: &str,
+    intro: &str,
+    lines: impl IntoIterator<Item = &'a core::net::SocketAddr>,
+) -> String {
+    let mut lines = lines.into_iter().peekable();
+    if lines.peek().is_none() {
+        return String::new();
+    }
+    let lines: Vec<String> = core::iter::once(json(intro))
+        .chain(lines.map(|addr| json(&addr.to_string())))
+        .collect();
+    format!(
+        ",\n    {}: [\n      {}\n    ]",
+        json(key),
+        lines.join(",\n      ")
+    )
+}
+
 /// The skeleton with the settings `taken` shows filled in. Each is a
 /// one-line array in the skeleton, so each is found by its exact text.
-fn render(taken: &Taken) -> String {
+fn render(taken: &Taken, applies: Applies) -> String {
     let Taken {
         sheep,
         pid,
@@ -316,29 +356,39 @@ fn render(taken: &Taken) -> String {
             format!("\"allowWrite\": [{}],", json(cwd)),
         );
     }
-    fill(
-        "\"publish\": [],",
-        format!("\"publish\": [{}],", addresses(&observed.listening)),
-    );
-    let https = if observed.https.is_empty() {
-        String::new()
+    let (published, listening) = if applies.publish {
+        (addresses(&observed.listening), String::new())
     } else {
-        let lines = [
-            "The sheep holds connections to these addresses on port 443. allowedDomains covers HTTPS by name, \
-             so name the hosts there; an address cannot be named."
-                .to_owned(),
-        ]
-        .into_iter()
-        .chain(observed.https.iter().map(ToString::to_string));
-        let lines: Vec<String> = lines.map(|line| json(&line)).collect();
-        format!(
-            ",\n    \"// dialed over HTTPS\": [\n      {}\n    ]",
-            lines.join(",\n      ")
-        )
+        let listening = comment(
+            "// listening",
+            "The sheep listens on these addresses. crabpot does not apply publish on this platform and refuses a non-empty list, so they are listed here.",
+            &observed.listening,
+        );
+        (String::new(), listening)
     };
     fill(
+        "\"publish\": []",
+        format!("\"publish\": [{published}]{listening}"),
+    );
+    let (dialed, direct) = if applies.allow_tcp {
+        (addresses(&observed.dials), String::new())
+    } else {
+        let direct = comment(
+            "// dialed directly",
+            "The sheep holds TCP connections to these addresses. crabpot applies allowTcp on Linux only and refuses a non-empty list elsewhere, so they are listed here.",
+            &observed.dials,
+        );
+        (String::new(), direct)
+    };
+    let https = comment(
+        "// dialed over HTTPS",
+        "The sheep holds connections to these addresses on port 443. allowedDomains covers HTTPS by name, \
+         so name the hosts there; an address cannot be named.",
+        &observed.https,
+    );
+    fill(
         "\"allowTcp\": []",
-        format!("\"allowTcp\": [{}]{https}", addresses(&observed.dials)),
+        format!("\"allowTcp\": [{dialed}]{direct}{https}"),
     );
     text
 }

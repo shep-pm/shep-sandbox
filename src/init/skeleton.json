@@ -37,13 +37,13 @@
     "deniedDomains": [],
     "// publish": [
       "Addresses the sheep may listen on, as address:port with an IP literal and a port from 1 to 65535, so the host can reach a service sheep.",
-      "crabpot applies it on macOS and refuses a non-empty list on Linux and Windows for now.",
+      "crabpot applies it on macOS and Linux and refuses a non-empty list on Windows for now.",
       "Example: [\"127.0.0.1:8001\", \"0.0.0.0:3600\"]"
     ],
     "publish": [],
     "// allowTcp": [
       "Hosts the sheep may dial directly over TCP, as host:port, for a service that does not speak HTTP such as a database.",
-      "A host is a DNS name or an IP literal. crabpot refuses a non-empty list wherever it cannot apply the key yet, which is every platform today.",
+      "A host is a DNS name or an IP literal. crabpot applies it on Linux only and refuses a non-empty list on macOS and Windows for now.",
       "Example: [\"10.0.0.5:3306\", \"db.internal:5432\"]"
     ],
     "allowTcp": []
