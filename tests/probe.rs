@@ -78,17 +78,37 @@ fn the_manifest_declares_the_sandbox_verb_with_init_and_doctor() {
 }
 
 #[test]
-fn a_verb_that_is_not_built_yet_says_so_and_exits_2() {
-    for verb in ["init", "doctor"] {
-        let output = run(&[verb]);
+fn init_is_not_built_yet_and_exits_2() {
+    let output = run(&["init"]);
 
-        assert_eq!(output.status.code(), Some(2), "{verb}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("not built yet"),
-            "{verb}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("not built yet"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn doctor_with_no_crabpot_on_path_names_the_check_and_exits_1() {
+    let output = Command::new(DOG_BIN)
+        .arg("doctor")
+        .env("PATH", "")
+        .output()
+        .expect("the dog binary ran");
+
+    assert_eq!(output.status.code(), Some(1));
+    let printed = stdout(&output);
+    assert!(printed.contains("FAIL  crabpot"), "{printed}");
+    assert!(printed.contains("cargo install crabpot"), "{printed}");
+}
+
+#[test]
+fn doctor_takes_no_arguments() {
+    let output = run(&["doctor", "--verbose"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("takes no arguments"));
 }
 
 #[test]
@@ -108,17 +128,11 @@ fn run_by_hand_with_no_shepherd_the_dog_says_why_it_stopped() {
 }
 
 #[test]
-fn a_verb_with_more_arguments_is_still_not_built_yet() {
-    for args in [&["doctor", "--verbose"][..], &["init", "foo"][..]] {
-        let output = run(args);
+fn init_with_more_arguments_is_still_not_built_yet() {
+    let output = run(&["init", "foo"]);
 
-        assert_eq!(output.status.code(), Some(2), "{args:?}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("not built yet"),
-            "{args:?}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("not built yet"));
 }
 
 #[test]

@@ -1,15 +1,16 @@
 //! Run a shep sheep inside a crabpot sandbox.
 //!
 //! Adopted, the dog has no work of its own yet: it reads its `[sandbox]`
-//! section and idles until the shepherd stops it. `shep sandbox init` and
-//! `shep sandbox doctor` reach the same binary as a first argument and say
-//! they are not built yet.
+//! section and idles until the shepherd stops it. `shep sandbox doctor` reaches
+//! the same binary as a first argument and checks the host. `shep sandbox
+//! init` does too, and says it is not built yet.
 //!
 //! `shep adopt` asks `--version`, `--schema` and `--shep-manifest` of a
 //! candidate it has not registered. [`Probe::answer`] replies on the first
 //! line of [`main`], before this process opens a socket or reads `$SHEP_HOME`.
 
 mod config;
+mod doctor;
 mod error;
 
 use std::{ffi::OsString, process::ExitCode};
@@ -25,15 +26,15 @@ use crate::{config::Section, error::Error};
 /// picks for this binary.
 const DEFAULT_NAME: &str = "sandbox";
 
-/// The verbs `shep sandbox` forwards to this binary, which are not built yet.
+/// The verbs `shep sandbox` forwards to this binary.
 const VERBS: [(&str, &str); 2] = [
     ("init", "Set up the sandbox for a sheep"),
     ("doctor", "Check that the sandbox is set up"),
 ];
 
-/// Exit status for a verb that is declared and not built, which is the same
-/// code shep uses for bad arguments.
-const NOT_BUILT: u8 = shep_client::shep_core::exit::USAGE;
+/// Exit status for a verb that is declared and not built, or given an
+/// argument it does not take, which is the code shep uses for bad arguments.
+const USAGE: u8 = shep_client::shep_core::exit::USAGE;
 
 fn verb() -> Verb {
     let mut verb = Verb::new("Run a shep sheep inside a crabpot sandbox");
@@ -54,8 +55,11 @@ async fn main() -> ExitCode {
     if let Some(first) = args.first()
         && VERBS.iter().any(|(name, _)| name == first)
     {
+        if first == "doctor" {
+            return doctor_verb(&args[1..]);
+        }
         eprintln!("shep-sandbox: `{first}` is not built yet");
-        return ExitCode::from(NOT_BUILT);
+        return ExitCode::from(USAGE);
     }
 
     match run(&args).await {
@@ -65,6 +69,17 @@ async fn main() -> ExitCode {
             ExitCode::from(err.exit_code())
         }
     }
+}
+
+/// `shep sandbox doctor`: print every check and exit 1 if any failed.
+fn doctor_verb(args: &[String]) -> ExitCode {
+    if !args.is_empty() {
+        eprintln!("shep-sandbox: `doctor` takes no arguments");
+        return ExitCode::from(USAGE);
+    }
+    let report = doctor::run(&doctor::System);
+    print!("{report}");
+    ExitCode::from(report.exit_code())
 }
 
 /// Whether the shepherd handed this process a connection, which it does only
