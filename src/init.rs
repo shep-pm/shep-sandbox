@@ -2,7 +2,7 @@
 
 use core::fmt;
 use std::{
-    fs::OpenOptions,
+    fs::{self, File, OpenOptions},
     io::{self, Write as _},
     path::{Path, PathBuf},
 };
@@ -81,20 +81,31 @@ pub fn run(dir: &Path, args: &[String]) -> Result<PathBuf, Error> {
         return Err(Error::Usage { arg: arg.clone() });
     }
     let path = dir.join(args.first().map_or(DEFAULT_PATH, String::as_str));
+    create(&path, |file| file.write_all(SKELETON.as_bytes()))?;
+    Ok(path)
+}
+
+/// Create the file at `path`, which must not exist, and `fill` it. A file
+/// that `fill` fails to write is removed, so a retry is not refused for a
+/// half-written one.
+fn create(path: &Path, fill: impl FnOnce(&mut File) -> io::Result<()>) -> Result<(), Error> {
     let write = |source| Error::Write {
-        path: path.clone(),
+        path: path.to_owned(),
         source,
     };
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(&path)
+        .open(path)
         .map_err(|source| match source.kind() {
-            io::ErrorKind::AlreadyExists => Error::Exists(path.clone()),
+            io::ErrorKind::AlreadyExists => Error::Exists(path.to_owned()),
             _ => write(source),
         })?;
-    file.write_all(SKELETON.as_bytes()).map_err(write)?;
-    Ok(path)
+    fill(&mut file).map_err(|source| {
+        // Best effort: the write error is the one worth reporting.
+        let _ = fs::remove_file(path);
+        write(source)
+    })
 }
 
 #[cfg(test)]

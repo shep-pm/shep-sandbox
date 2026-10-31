@@ -3,7 +3,7 @@ use std::fs;
 use serde_json::Value;
 use tempfile::tempdir;
 
-use super::{Error, SKELETON, run};
+use super::{Error, SKELETON, create, run};
 
 fn args(list: &[&str]) -> Vec<String> {
     list.iter().map(|arg| (*arg).to_owned()).collect()
@@ -68,6 +68,18 @@ fn a_directory_that_does_not_exist_is_a_write_failure() {
     let err = run(dir.path(), &args(&["missing/sandbox.json"])).unwrap_err();
 
     assert!(matches!(err, Error::Write { .. }), "{err}");
+}
+
+#[test]
+fn a_file_whose_write_fails_is_removed_so_a_retry_can_create_it() {
+    let dir = tempdir().unwrap();
+    let target = dir.path().join("sandbox.json");
+
+    let err = create(&target, |_| Err(std::io::Error::other("disk full"))).unwrap_err();
+
+    assert!(matches!(err, Error::Write { .. }), "{err}");
+    assert!(!target.exists());
+    run(dir.path(), &[]).unwrap();
 }
 
 #[test]
