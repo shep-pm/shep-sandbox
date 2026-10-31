@@ -442,8 +442,7 @@ fn a_sheep_with_no_settings_file_fails_with_how_to_make_one() {
         panic!("not failed: {report}");
     };
     assert!(detail.contains("/etc/web.json does not exist"));
-    assert!(fix.contains("echo '{}' > /etc/web.json"));
-    assert!(!fix.contains("shep sandbox init"), "init is not built yet");
+    assert!(fix.contains("shep sandbox init /etc/web.json"));
 }
 
 #[test]

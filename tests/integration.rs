@@ -164,21 +164,6 @@ fn an_adopted_dog_connects_and_exits_0_when_stopped() {
 }
 
 #[test]
-fn init_reaches_the_binary_through_shep_and_exits_2() {
-    let shepherd = Shepherd::new();
-    shepherd.adopt_dog();
-
-    let output = shepherd
-        .command()
-        .args(["sandbox", "init"])
-        .output()
-        .expect("shep ran");
-
-    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
-    assert!(stderr(&output).contains("not built yet"));
-}
-
-#[test]
 fn doctor_reaches_the_binary_through_shep_and_prints_its_checks() {
     let shepherd = Shepherd::new();
     shepherd.adopt_dog();
@@ -199,6 +184,23 @@ fn doctor_reaches_the_binary_through_shep_and_prints_its_checks() {
     );
     let printed = String::from_utf8_lossy(&output.stdout);
     assert!(printed.contains("crabpot"), "{printed}");
+}
+
+#[test]
+fn init_reaches_the_binary_through_shep_and_writes_the_file() {
+    let shepherd = Shepherd::new();
+    shepherd.adopt_dog();
+    let dir = tempfile::tempdir().expect("a temp dir");
+
+    let output = shepherd
+        .command()
+        .current_dir(dir.path())
+        .args(["sandbox", "init"])
+        .output()
+        .expect("shep ran");
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(dir.path().join("sandbox.json").is_file());
 }
 
 #[test]

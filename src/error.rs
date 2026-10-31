@@ -4,6 +4,8 @@ use core::fmt;
 
 use shep_client::dogs::{HomeError, SectionError, ShepherdError, UsageError};
 
+use crate::init;
+
 /// What stopped the dog, each carrying the exit code shep itself would use
 /// for the same cause.
 #[derive(Debug)]
@@ -16,6 +18,8 @@ pub enum Error {
     Shepherd(ShepherdError),
     /// The `[sandbox]` section of `dogs.toml` has a key the dog does not have.
     Config(SectionError),
+    /// `shep sandbox init` wrote nothing.
+    Init(init::Error),
     /// `shep <name>` ran the dog with no subcommand: named by the shepherd,
     /// but holding no connection to it, so not the supervised dog.
     Bare {
@@ -32,7 +36,10 @@ impl Error {
             Self::Home(err) => err.exit_code(),
             Self::Shepherd(err) => err.exit_code(),
             Self::Config(err) => err.exit_code(),
-            Self::Bare { .. } => shep_client::shep_core::exit::USAGE,
+            Self::Init(init::Error::Usage { .. }) | Self::Bare { .. } => {
+                shep_client::shep_core::exit::USAGE
+            }
+            Self::Init(_) => shep_client::shep_core::exit::FAILURE,
         }
     }
 }
@@ -44,6 +51,7 @@ impl fmt::Display for Error {
             Self::Home(err) => err.fmt(f),
             Self::Shepherd(err) => err.fmt(f),
             Self::Config(err) => err.fmt(f),
+            Self::Init(err) => err.fmt(f),
             Self::Bare { verbs } => write!(f, "takes a subcommand: {}", verbs.join(", ")),
         }
     }
@@ -56,6 +64,7 @@ impl core::error::Error for Error {
             Self::Home(err) => Some(err),
             Self::Shepherd(err) => Some(err),
             Self::Config(err) => Some(err),
+            Self::Init(err) => Some(err),
             Self::Bare { .. } => None,
         }
     }
@@ -82,5 +91,11 @@ impl From<ShepherdError> for Error {
 impl From<SectionError> for Error {
     fn from(err: SectionError) -> Self {
         Self::Config(err)
+    }
+}
+
+impl From<init::Error> for Error {
+    fn from(err: init::Error) -> Self {
+        Self::Init(err)
     }
 }

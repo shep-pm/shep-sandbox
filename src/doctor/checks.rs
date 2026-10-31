@@ -247,7 +247,7 @@ fn sheep_check(env: &dyn Env, sheep: &SandboxedSheep) -> Check {
             fail(
                 format!("settings file {} does not exist", settings.display()),
                 format!(
-                    "Create it, for example:\necho '{{}}' > {}",
+                    "Create it, for example:\nshep sandbox init {}",
                     settings.display()
                 ),
             ),
