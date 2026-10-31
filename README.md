@@ -27,6 +27,23 @@ shep sandbox init web.json   # writes ./web.json
 
 `init` writes a settings file for [crabpot](https://github.com/shep-pm/crabpot) and refuses to overwrite one that exists. The file opens the sheep's cwd for writing and allows no network. Each setting has a `"//"` comment key above it that says what it does and gives an example: `filesystem.allowWrite`, `denyRead` and `denyWrite`, and `network.allowedDomains`, `deniedDomains`, `publish` and `allowTcp`. crabpot reads plain JSON and drops keys it does not know, so the comments cost nothing.
 
+### Start from a running sheep
+
+```sh
+shep sandbox init --from web           # writes ./sandbox.json
+shep sandbox init web.json --from web
+```
+
+`--from <sheep>` asks the shepherd for the running sheep, then reads the TCP sockets held by its process and its children: `/proc` on Linux, `lsof` on macOS.
+
+- Listening sockets become `network.publish`.
+- Connections the sheep dialed become `network.allowTcp`. A connection accepted on one of its listening ports is not a dial, and neither is a loopback dial to one of its own listeners.
+- A dial to port 443 is listed in a `"// dialed over HTTPS"` comment instead, since `allowedDomains` covers HTTPS by name.
+- The sheep's `cwd` becomes `filesystem.allowWrite`.
+- The rest is the plain skeleton. The file says which sheep and pid it was taken from.
+
+It is a snapshot. A port the sheep opens later, or a host it dials only now and then, is not in it. A sheep that is not running is refused by name.
+
 Run a command under it with `crabpot -s sandbox.json -- <command>`.
 
 ## Check the host
