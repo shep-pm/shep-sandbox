@@ -2,8 +2,8 @@
 //!
 //! Adopted, the dog has no work of its own yet: it reads its `[sandbox]`
 //! section and idles until the shepherd stops it. `shep sandbox init` and
-//! `shep sandbox doctor` reach the same binary as a first argument and say
-//! they are not built yet.
+//! `shep sandbox doctor` reach the same binary as a first argument. `init`
+//! writes a settings file; `doctor` says it is not built yet.
 //!
 //! `shep adopt` asks `--version`, `--schema` and `--shep-manifest` of a
 //! candidate it has not registered. [`Probe::answer`] replies on the first
@@ -11,8 +11,9 @@
 
 mod config;
 mod error;
+mod init;
 
-use std::{ffi::OsString, process::ExitCode};
+use std::{ffi::OsString, path::Path, process::ExitCode};
 
 use shep_client::dogs::{self, DogAction, DogIdentity, DogRuntime, Probe, Stop, Subcommand, Verb};
 
@@ -25,11 +26,14 @@ use crate::{config::Section, error::Error};
 /// picks for this binary.
 const DEFAULT_NAME: &str = "sandbox";
 
-/// The verbs `shep sandbox` forwards to this binary, which are not built yet.
+/// The verbs `shep sandbox` forwards to this binary.
 const VERBS: [(&str, &str); 2] = [
     ("init", "Set up the sandbox for a sheep"),
     ("doctor", "Check that the sandbox is set up"),
 ];
+
+/// The verb that is declared and not built yet.
+const NOT_BUILT_VERB: &str = "doctor";
 
 /// Exit status for a verb that is declared and not built, which is the same
 /// code shep uses for bad arguments.
@@ -51,16 +55,34 @@ async fn main() -> ExitCode {
         .answer::<Section>();
 
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if let Some(first) = args.first()
-        && VERBS.iter().any(|(name, _)| name == first)
-    {
-        eprintln!("shep-sandbox: `{first}` is not built yet");
-        return ExitCode::from(NOT_BUILT);
+    match args.first().map(String::as_str) {
+        Some(NOT_BUILT_VERB) => {
+            eprintln!("shep-sandbox: `{NOT_BUILT_VERB}` is not built yet");
+            return ExitCode::from(NOT_BUILT);
+        }
+        Some("init") => return init_verb(&args[1..]),
+        _ => {}
     }
 
     match run(&args).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
+            eprintln!("shep-sandbox: {err}");
+            ExitCode::from(err.exit_code())
+        }
+    }
+}
+
+/// Write the settings file `shep sandbox init` asks for, in the current
+/// directory unless the path says otherwise.
+fn init_verb(args: &[String]) -> ExitCode {
+    match init::run(Path::new("."), args) {
+        Ok(path) => {
+            println!("wrote {}", path.display());
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            let err = Error::from(err);
             eprintln!("shep-sandbox: {err}");
             ExitCode::from(err.exit_code())
         }
