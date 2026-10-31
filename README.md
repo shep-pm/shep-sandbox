@@ -16,7 +16,7 @@ shep adopt shep-sandbox --yes
 
 shep names the dog `sandbox`. Adopted, it has no work of its own yet: it connects to the shepherd, reads its `[sandbox]` section of `dogs.toml` (which has no keys yet) and idles until the shepherd stops it.
 
-`shep sandbox init` and `shep sandbox doctor` are declared in the dog's manifest, so `shep --help` and completion list them. `doctor` prints "not built yet" and exits 2 for now.
+`shep sandbox init` and `shep sandbox doctor` are declared in the dog's manifest, so `shep --help` and completion list them.
 
 ## Start a sandbox
 
@@ -45,6 +45,20 @@ shep sandbox init web.json --from web
 It is a snapshot. A port the sheep opens later, or a host it dials only now and then, is not in it. A sheep that is not running is refused by name.
 
 Run a command under it with `crabpot -s sandbox.json -- <command>`.
+
+## Check the host
+
+```sh
+shep sandbox doctor
+```
+
+Prints each check as `ok`, `FAIL` or `skip`, with the fix under every failure, and exits 1 if any failed so a deploy script can gate on it. A check that does not apply to this host is skipped and says why.
+
+- crabpot is on `PATH`, with its version
+- Linux: `bwrap` is on `PATH`. macOS: `/usr/bin/sandbox-exec` exists
+- Ubuntu 24.04 and later: `kernel.apparmor_restrict_unprivileged_userns` is 0 and the `bwrap-userns-restrict` AppArmor profile is not loaded. The profile list is readable by root only, so the profile check is skipped for any other user
+- Linux: a descriptor the shepherd opens (fd 3) reaches a sandboxed command. crabpot 0.7.0 and 0.8.0 close it ([shep-pm/crabpot#307](https://github.com/shep-pm/crabpot/issues/307)). The check runs a probe instead of comparing versions
+- Each sheep in the flock with `sandbox` set: its settings file exists and `crabpot -s <file> -- true` exits 0 from its `cwd`. The shepherd has no `sandbox` key to read yet, so this check is skipped for now
 
 `shep-sandbox --version`, `--schema` and `--shep-manifest` answer without a shepherd running.
 

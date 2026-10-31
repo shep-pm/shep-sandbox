@@ -3,13 +3,14 @@
 //! Adopted, the dog has no work of its own yet: it reads its `[sandbox]`
 //! section and idles until the shepherd stops it. `shep sandbox init` and
 //! `shep sandbox doctor` reach the same binary as a first argument. `init`
-//! writes a settings file; `doctor` says it is not built yet.
+//! writes a settings file; `doctor` checks the host.
 //!
 //! `shep adopt` asks `--version`, `--schema` and `--shep-manifest` of a
 //! candidate it has not registered. [`Probe::answer`] replies on the first
 //! line of [`main`], before this process opens a socket or reads `$SHEP_HOME`.
 
 mod config;
+mod doctor;
 mod error;
 mod init;
 
@@ -41,12 +42,9 @@ const VERBS: [(&str, &str); 2] = [
     ("doctor", "Check that the sandbox is set up"),
 ];
 
-/// The verb that is declared and not built yet.
-const NOT_BUILT_VERB: &str = "doctor";
-
-/// Exit status for a verb that is declared and not built, which is the same
+/// Exit status for a verb given an argument it does not take, which is the
 /// code shep uses for bad arguments.
-const NOT_BUILT: u8 = shep_client::shep_core::exit::USAGE;
+const USAGE: u8 = shep_client::shep_core::exit::USAGE;
 
 fn verb() -> Verb {
     let mut verb = Verb::new("Run a shep sheep inside a crabpot sandbox");
@@ -65,10 +63,7 @@ async fn main() -> ExitCode {
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        Some(NOT_BUILT_VERB) => {
-            eprintln!("shep-sandbox: `{NOT_BUILT_VERB}` is not built yet");
-            return ExitCode::from(NOT_BUILT);
-        }
+        Some("doctor") => return doctor_verb(&args[1..]),
         Some("init") => return init_verb(&args[1..]).await,
         _ => {}
     }
@@ -80,6 +75,17 @@ async fn main() -> ExitCode {
             ExitCode::from(err.exit_code())
         }
     }
+}
+
+/// `shep sandbox doctor`: print every check and exit 1 if any failed.
+fn doctor_verb(args: &[String]) -> ExitCode {
+    if !args.is_empty() {
+        eprintln!("shep-sandbox: `doctor` takes no arguments");
+        return ExitCode::from(USAGE);
+    }
+    let report = doctor::run(&doctor::System);
+    print!("{report}");
+    ExitCode::from(report.exit_code())
 }
 
 /// Write the settings file `shep sandbox init` asks for, in the current

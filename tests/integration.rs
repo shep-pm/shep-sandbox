@@ -164,7 +164,7 @@ fn an_adopted_dog_connects_and_exits_0_when_stopped() {
 }
 
 #[test]
-fn a_verb_reaches_the_binary_through_shep_and_exits_2() {
+fn doctor_reaches_the_binary_through_shep_and_prints_its_checks() {
     let shepherd = Shepherd::new();
     shepherd.adopt_dog();
 
@@ -174,8 +174,16 @@ fn a_verb_reaches_the_binary_through_shep_and_exits_2() {
         .output()
         .expect("shep ran");
 
-    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
-    assert!(stderr(&output).contains("not built yet"));
+    // Whether the runner has crabpot decides 0 or 1, and 2 would mean the
+    // verb never reached the doctor.
+    assert!(
+        matches!(output.status.code(), Some(0 | 1)),
+        "{:?}: {}",
+        output.status.code(),
+        stderr(&output)
+    );
+    let printed = String::from_utf8_lossy(&output.stdout);
+    assert!(printed.contains("crabpot"), "{printed}");
 }
 
 #[test]
