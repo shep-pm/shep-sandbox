@@ -34,11 +34,11 @@ shep sandbox init --from web           # writes ./sandbox.json
 shep sandbox init web.json --from web
 ```
 
-`--from <sheep>` asks the shepherd for the running sheep, then reads the TCP sockets held by its process and its children: `/proc` on Linux, `lsof` on macOS.
+`--from <sheep>` asks the shepherd for the running sheep, then reads the TCP sockets held by its process and its children: `/proc` on Linux, `lsof` on macOS. Windows has no socket reader yet, so `--from` is refused there.
 
-- Listening sockets become `network.publish`.
-- Connections the sheep dialed become `network.allowTcp`. A connection accepted on one of its listening ports is not a dial, and neither is a loopback dial to one of its own listeners.
-- A dial to port 443 is listed in a `"// dialed over HTTPS"` comment instead, since `allowedDomains` covers HTTPS by name.
+- Listening sockets become `network.publish` on Linux and macOS.
+- Connections the sheep dialed become `network.allowTcp` on Linux. On macOS, where crabpot refuses a non-empty `allowTcp`, they go in a `"// dialed directly"` comment and `allowTcp` stays empty. A connection accepted on one of its listening ports is not a dial, and neither is a loopback dial to one of its own listeners.
+- A dial to port 443 is listed in a `"// dialed over HTTPS"` comment on every platform that has a socket reader, since `allowedDomains` covers HTTPS by name.
 - The sheep's `cwd` becomes `filesystem.allowWrite`.
 - The rest is the plain skeleton. The file says which sheep and pid it was taken from.
 
