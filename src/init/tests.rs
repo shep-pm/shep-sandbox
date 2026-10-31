@@ -912,13 +912,50 @@ mod from_a_sheep {
         refused
     }
 
-    #[test]
-    fn the_file_written_for_this_host_holds_no_key_crabpot_refuses_here() {
+    fn run_taken(cwd: Option<&str>) -> Value {
         let dir = tempdir().unwrap();
         let args = parse(&["sandbox.json".to_owned()]).unwrap();
         let path: PathBuf =
-            super::super::run(dir.path(), &args, Some(&taken(None, &observed()))).unwrap();
-        let file: Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+            super::super::run(dir.path(), &args, Some(&taken(cwd, &observed()))).unwrap();
+        serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn run_writes_the_taken_sheeps_contents_where_this_host_applies_them() {
+        let file = run_taken(Some("/srv/web"));
+
+        assert_eq!(file["filesystem"]["allowWrite"], json!(["/srv/web"]));
+        assert!(
+            file["// sandbox.json"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|line| line.contains("running sheep web") && line.contains("4100"))
+        );
+        if cfg!(any(target_os = "linux", target_os = "macos")) {
+            assert_eq!(
+                file["network"]["publish"],
+                json!(["0.0.0.0:8080", "[::]:8443"])
+            );
+        } else {
+            assert_eq!(file["network"]["publish"], json!([]));
+        }
+        if cfg!(target_os = "linux") {
+            assert_eq!(file["network"]["allowTcp"], json!(["10.0.0.5:3306"]));
+        } else {
+            assert_eq!(file["network"]["allowTcp"], json!([]));
+            assert!(
+                lines(&file, "// dialed directly")
+                    .iter()
+                    .any(|line| line == "10.0.0.5:3306")
+            );
+        }
+    }
+
+    #[test]
+    fn the_file_written_for_this_host_holds_no_key_crabpot_refuses_here() {
+        let file = run_taken(None);
 
         assert_eq!(refused_keys(&file), Vec::<&str>::new());
     }
