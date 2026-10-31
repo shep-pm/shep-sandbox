@@ -55,3 +55,21 @@ jobs:
       # Matches `rust-version` in Cargo.toml.
       - run: rustup toolchain install 1.88 --profile minimal
       - run: cargo +1.88 check --all-targets --all-features --locked
+
+  integration:
+    # Drives a real shepherd, which no other job here does. Feature-gated off
+    # by default because a fresh clone has no `shep` binary.
+    #
+    # Built from shep's `main` rather than the version the lockfile pins, so
+    # a red job means shep's surface moved under this dog.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install stable --profile minimal
+      # The bare `shep` is the package spec: the workspace holds more than
+      # one package with a binary, and `--bin` does not pick between them.
+      - name: Build a real shep
+        run: cargo install --git https://github.com/shep-pm/shep --branch main shep --bin shep --locked
+      - name: Run the integration tier against it
+        run: SHEP_BIN="$(command -v shep)" cargo test --features integration --locked

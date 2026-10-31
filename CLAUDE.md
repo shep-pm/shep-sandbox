@@ -2,18 +2,22 @@
 
 Run a shep sheep inside a crabpot sandbox. MIT OR Apache-2.0.
 
-The plan is a split. shep spawns a sandboxed sheep through a per-sheep `crabpot -s <settings> -- <cmd>` launcher, because crabpot has no daemon and a sandbox lives in the process that started it. This dog handles the rest: install and doctor, the presets, and surfacing violations. The design is still being charted on this repository's issues (the `wayfinder:map` issue), and nothing is built yet.
+The plan is a split. shep spawns a sandboxed sheep through a per-sheep `crabpot -s <settings> -- <cmd>` launcher, because crabpot has no daemon and a sandbox lives in the process that started it. This dog handles the rest: install and doctor, the presets, and surfacing violations. The design is still being charted on this repository's issues (the `wayfinder:map` issue).
+
+So far it is an adoptable dog and nothing else. Adopted (`$SHEP_DOG_NAME` set, no verb), it reads its `[sandbox]` section and idles until the shepherd stops it. `shep sandbox init` and `shep sandbox doctor` reach it as a first argument and exit 2 with "not built yet".
 
 ## Commands
 
 - `cargo test --locked` is the test shape.
+- The `integration` feature gates `tests/integration.rs`, which drives a real shepherd: `SHEP_BIN=$(command -v shep) cargo test --features integration --locked`. CI builds shep from `main` for it.
 - CI's gates, all required: `cargo fmt --all -- --check`, `cargo clippy --all-targets --all-features --locked -- -D warnings`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps --all-features --locked`, and `cargo +1.88 check --all-targets --all-features --locked` for the MSRV.
 - One cargo command at a time: they share the target-dir lock.
 - `rust-toolchain.toml` floats on stable, like CI. When CI's clippy flags something a local run did not, `rustup update stable` first.
 
 ## Where things live
 
-- `src/main.rs`: an empty binary until the design settles.
+- `src/main.rs`: the probes, the two placeholder verbs, and the idle loop. `src/config.rs` is the `[sandbox]` section, `src/error.rs` what stops the dog.
+- `tests/probe.rs` runs the binary with shep's flags and verbs. `tests/integration.rs` needs a built shep.
 - `docs/design-notes.md`: the discussion that started the effort. Decisions after it live on the map's tickets, not here.
 
 ## Style
