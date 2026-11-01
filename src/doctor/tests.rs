@@ -25,6 +25,7 @@ struct Fake {
     flock: Vec<SandboxedSheep>,
     ran: RefCell<Vec<Command>>,
     removed: RefCell<Vec<PathBuf>>,
+    written: RefCell<Vec<String>>,
 }
 
 impl Fake {
@@ -37,6 +38,7 @@ impl Fake {
             flock: Vec::new(),
             ran: RefCell::default(),
             removed: RefCell::default(),
+            written: RefCell::default(),
         };
         fake.file("/etc/os-release", "ID=ubuntu\nVERSION_ID=\"24.04\"\n");
         fake.file(
@@ -127,7 +129,8 @@ impl Env for Fake {
         self.files.contains_key(path)
     }
 
-    fn write_temp(&self, _contents: &str) -> io::Result<PathBuf> {
+    fn write_temp(&self, contents: &str) -> io::Result<PathBuf> {
+        self.written.borrow_mut().push(contents.to_owned());
         Ok(PROBE_SETTINGS.into())
     }
 
@@ -362,6 +365,26 @@ fn the_fd3_probe_passes_when_the_descriptor_reaches_the_command() {
         .expect("the probe ran");
     assert!(probe.pipe_on_fd3);
     assert_eq!(*fake.removed.borrow(), [PathBuf::from(PROBE_SETTINGS)]);
+}
+
+#[test]
+fn the_fd3_probe_writes_settings_with_the_network_and_filesystem_keys_crabpot_requires() {
+    let fake = Fake::linux();
+
+    run(&fake);
+
+    let written = fake.written.borrow();
+    let [contents] = written.as_slice() else {
+        panic!("expected one settings file, wrote {written:?}");
+    };
+    let settings: serde_json::Value = serde_json::from_str(contents).expect("JSON settings");
+    assert_eq!(
+        settings,
+        serde_json::json!({
+            "network": { "allowedDomains": [], "deniedDomains": [] },
+            "filesystem": { "denyRead": [], "allowWrite": [], "denyWrite": [] },
+        })
+    );
 }
 
 #[test]

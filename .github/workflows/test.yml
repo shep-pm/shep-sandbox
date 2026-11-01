@@ -71,5 +71,24 @@ jobs:
       # one package with a binary, and `--bin` does not pick between them.
       - name: Build a real shep
         run: cargo install --git https://github.com/shep-pm/shep --branch main shep --bin shep --locked
+      # doctor's shepherd channel probe runs a real crabpot, which needs
+      # bubblewrap and, on Ubuntu 24.04+, unprivileged user namespaces.
+      - name: Install bubblewrap
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      # Ubuntu's `bwrap-userns-restrict` profile confines what bwrap starts
+      # and strips its capabilities, so crabpot's helper cannot unshare even
+      # with the sysctl off. The profile is where the doctor's fix says to
+      # unload it from.
+      - name: Allow unprivileged user namespaces
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          profile=/etc/apparmor.d/bwrap-userns-restrict
+          if [ -e "$profile" ]; then sudo apparmor_parser -R "$profile"; fi
+          if sudo grep -s '^bwrap' /sys/kernel/security/apparmor/profiles; then
+            echo "::error::a bwrap AppArmor profile is still loaded"
+            exit 1
+          fi
+      - name: Install crabpot
+        run: cargo install crabpot --locked
       - name: Run the integration tier against it
         run: SHEP_BIN="$(command -v shep)" cargo test --features integration --locked
