@@ -63,7 +63,7 @@ async fn main() -> ExitCode {
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        Some("doctor") => return doctor_verb(&args[1..]),
+        Some("doctor") => return doctor_verb(&args[1..]).await,
         Some("init") => return init_verb(&args[1..]).await,
         _ => {}
     }
@@ -78,12 +78,12 @@ async fn main() -> ExitCode {
 }
 
 /// `shep sandbox doctor`: print every check and exit 1 if any failed.
-fn doctor_verb(args: &[String]) -> ExitCode {
+async fn doctor_verb(args: &[String]) -> ExitCode {
     if !args.is_empty() {
         eprintln!("shep-sandbox: `doctor` takes no arguments");
         return ExitCode::from(USAGE);
     }
-    let report = doctor::run(&doctor::System);
+    let report = doctor::run(&doctor::System::new(doctor::read_flock().await));
     print!("{report}");
     ExitCode::from(report.exit_code())
 }

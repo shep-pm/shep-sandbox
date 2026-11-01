@@ -4,8 +4,11 @@
 //! run a command or read a file, so tests answer for the host with a fake.
 
 mod checks;
+mod flock;
 #[cfg(test)]
 mod tests;
+
+pub use flock::FlockError;
 
 use std::{
     fmt, fs, io,
@@ -94,8 +97,8 @@ pub trait Env {
     fn write_temp(&self, contents: &str) -> io::Result<PathBuf>;
     /// Removes a file [`Env::write_temp`] made.
     fn remove(&self, path: &Path);
-    /// The sheep in the flock with `sandbox` set.
-    fn sandboxed_sheep(&self) -> Vec<SandboxedSheep>;
+    /// The sheep in the flock with `sandbox` set, or why they are unknown.
+    fn sandboxed_sheep(&self) -> Result<Vec<SandboxedSheep>, FlockError>;
 }
 
 /// How one check ended.
@@ -173,10 +176,23 @@ pub fn run(env: &dyn Env) -> Report {
     Report { checks }
 }
 
-/// The real host.
-#[derive(Debug, Clone, Copy)]
-pub struct System;
+/// Reads the flock from the shepherd, for [`System`] to answer with.
+pub async fn read_flock() -> Result<Vec<SandboxedSheep>, FlockError> {
+    flock::read().await
+}
 
+/// The real host, with the flock as [`read_flock`] found it.
+#[derive(Debug, Clone)]
+pub struct System {
+    flock: Result<Vec<SandboxedSheep>, FlockError>,
+}
+
+impl System {
+    /// The host whose flock is `flock`.
+    pub fn new(flock: Result<Vec<SandboxedSheep>, FlockError>) -> Self {
+        Self { flock }
+    }
+}
 impl Env for System {
     fn os(&self) -> Os {
         if cfg!(target_os = "linux") {
@@ -238,9 +254,7 @@ impl Env for System {
         let _ = fs::remove_file(path);
     }
 
-    // shep 0.19 has no `sandbox` key on `[[app]]`, so there is nothing to
-    // read yet. This returns the flock once the shepherd carries the key.
-    fn sandboxed_sheep(&self) -> Vec<SandboxedSheep> {
-        Vec::new()
+    fn sandboxed_sheep(&self) -> Result<Vec<SandboxedSheep>, FlockError> {
+        self.flock.clone()
     }
 }

@@ -106,9 +106,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
- "js-sys",
  "num-traits",
- "wasm-bindgen",
  "windows-link",
 ]
 
@@ -136,9 +134,9 @@ checksum = "7f8f80099a98041a3d1622845c271458a2d73e688351bf3cb999266764b81d48"
 
 [[package]]
 name = "croner"
-version = "3.0.1"
+version = "4.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4aa42bcd3d846ebf66e15bd528d1087f75d1c6c1c66ebff626178a106353c576"
+checksum = "26d09284075f5c87675790d1ad74212a7863eb8bdf228cdbd364f08a152fc62d"
 dependencies = [
  "chrono",
  "derive_builder",
@@ -773,9 +771,9 @@ dependencies = [
 
 [[package]]
 name = "shep-channel"
-version = "0.19.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fac42fbf5f80233141c9a10b85663b6b1139ef86d0f41ef050791f1b23693abd"
+checksum = "b6d1b283cc87a0a5bf6f3d3c9fd6f1d28d74efbdcc90bbc79e34cbba835d0156"
 dependencies = [
  "serde",
  "serde_json",
@@ -784,9 +782,9 @@ dependencies = [
 
 [[package]]
 name = "shep-client"
-version = "0.19.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3a7b4d1c299a587650e060255f87898cd523dc73256fd461d51da9ec331ed9a"
+checksum = "32be0fab2428fff0bcb27e6a3ae82557bcac0c5d5558ca7bc9053427ea796977"
 dependencies = [
  "futures-util",
  "schemars",
@@ -803,9 +801,9 @@ dependencies = [
 
 [[package]]
 name = "shep-core"
-version = "0.19.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84291b3488c4ed611827c97951afefec462cd422bbe03bec40e638e8a76d299a"
+checksum = "68668c7e1f75042ac4d31a3d929186a0a645a6cde24c7c2f371b771739c950a8"
 dependencies = [
  "annotate-snippets",
  "anstyle",
@@ -835,9 +833,9 @@ dependencies = [
 
 [[package]]
 name = "shep-macros"
-version = "0.19.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b601977d71f4cdbbcd51a3a1fc8cc2ef30341d4a8f357ddd67b393ff828492b"
+checksum = "515d43498ae2968b32152160b3e5377da18585228e92b779444b3e9cc346457c"
 dependencies = [
  "proc-macro2",
  "quote 1.0.47",

@@ -350,3 +350,48 @@ fn init_from_a_sheep_that_is_stopped_is_refused_by_name() {
     assert!(stderr(&output).contains("idle is not running"));
     assert!(!dir.path().join("sandbox.json").exists());
 }
+
+#[test]
+fn doctor_names_a_sheep_started_with_sandbox_set() {
+    let shepherd = Shepherd::new();
+    shepherd.adopt_dog();
+    let cwd = tempfile::tempdir().expect("a cwd for the sheep");
+    let cwd = cwd.path().canonicalize().expect("a canonical cwd");
+    fs::write(cwd.join("idle.sh"), "#!/bin/sh\nsleep 300\n").expect("idle script");
+    fs::set_permissions(cwd.join("idle.sh"), fs::Permissions::from_mode(0o755)).expect("chmod");
+    let made = shepherd
+        .command()
+        .current_dir(&cwd)
+        .args(["sandbox", "init"])
+        .output()
+        .expect("shep ran");
+    assert!(made.status.success(), "{}", stderr(&made));
+    let flockfile = cwd.join("flock.toml");
+    fs::write(
+        &flockfile,
+        format!(
+            "[[app]]\nname = \"boxed\"\nscript = \"{dir}/idle.sh\"\ncwd = \"{dir}\"\nsandbox = \"sandbox.json\"\n",
+            dir = cwd.to_str().expect("cwd path")
+        ),
+    )
+    .expect("flockfile");
+    shepherd.ok(&[
+        "start",
+        flockfile.to_str().expect("flockfile path"),
+        "--style",
+        "bare",
+    ]);
+
+    let output = shepherd
+        .command()
+        .args(["sandbox", "doctor"])
+        .output()
+        .expect("shep ran");
+
+    let printed = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        printed.lines().any(|line| line.contains("sheep boxed")),
+        "{printed}"
+    );
+    assert!(!printed.contains("flock:"), "{printed}");
+}
