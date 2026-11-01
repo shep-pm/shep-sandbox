@@ -72,9 +72,11 @@ jobs:
       - name: Build a real shep
         run: cargo install --git https://github.com/shep-pm/shep --branch main shep --bin shep --locked
       # doctor's shepherd channel probe runs a real crabpot, which needs
-      # bubblewrap.
+      # bubblewrap and, on Ubuntu 24.04+, unprivileged user namespaces.
       - name: Install bubblewrap
         run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Install crabpot
         run: cargo install crabpot --locked
       - name: Run the integration tier against it
