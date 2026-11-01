@@ -83,6 +83,20 @@ pub struct SandboxedSheep {
     pub cwd: PathBuf,
 }
 
+/// A sheep in the flock with `sandbox` set, or why it cannot be checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FlockEntry {
+    /// A sheep whose settings file and `cwd` are known.
+    Sandboxed(SandboxedSheep),
+    /// A sheep doctor could not locate the settings file of.
+    Unchecked {
+        /// The sheep's name.
+        name: String,
+        /// Why it was not checked.
+        reason: String,
+    },
+}
+
 /// The host as the checks see it.
 pub trait Env {
     /// The operating system the dog runs on.
@@ -98,7 +112,7 @@ pub trait Env {
     /// Removes a file [`Env::write_temp`] made.
     fn remove(&self, path: &Path);
     /// The sheep in the flock with `sandbox` set, or why they are unknown.
-    fn sandboxed_sheep(&self) -> Result<Vec<SandboxedSheep>, FlockError>;
+    fn sandboxed_sheep(&self) -> Result<Vec<FlockEntry>, FlockError>;
 }
 
 /// How one check ended.
@@ -177,19 +191,19 @@ pub fn run(env: &dyn Env) -> Report {
 }
 
 /// Reads the flock from the shepherd, for [`System`] to answer with.
-pub async fn read_flock() -> Result<Vec<SandboxedSheep>, FlockError> {
+pub async fn read_flock() -> Result<Vec<FlockEntry>, FlockError> {
     flock::read().await
 }
 
 /// The real host, with the flock as [`read_flock`] found it.
 #[derive(Debug, Clone)]
 pub struct System {
-    flock: Result<Vec<SandboxedSheep>, FlockError>,
+    flock: Result<Vec<FlockEntry>, FlockError>,
 }
 
 impl System {
     /// The host whose flock is `flock`.
-    pub fn new(flock: Result<Vec<SandboxedSheep>, FlockError>) -> Self {
+    pub fn new(flock: Result<Vec<FlockEntry>, FlockError>) -> Self {
         Self { flock }
     }
 }
@@ -254,7 +268,7 @@ impl Env for System {
         let _ = fs::remove_file(path);
     }
 
-    fn sandboxed_sheep(&self) -> Result<Vec<SandboxedSheep>, FlockError> {
+    fn sandboxed_sheep(&self) -> Result<Vec<FlockEntry>, FlockError> {
         self.flock.clone()
     }
 }

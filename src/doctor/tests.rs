@@ -8,7 +8,7 @@ use std::{
 use shep_client::shep_core::{config::AppConfig, protocol::SANDBOX_SINCE};
 
 use super::{
-    Command, Env, Os, Output, Report, SandboxedSheep, Status,
+    Command, Env, FlockEntry, Os, Output, Report, SandboxedSheep, Status,
     flock::{self, FlockError},
     run,
 };
@@ -28,7 +28,7 @@ struct Fake {
     os: Os,
     files: BTreeMap<PathBuf, String>,
     replies: BTreeMap<String, Reply>,
-    flock: Result<Vec<SandboxedSheep>, FlockError>,
+    flock: Result<Vec<FlockEntry>, FlockError>,
     ran: RefCell<Vec<Command>>,
     removed: RefCell<Vec<PathBuf>>,
     written: RefCell<Vec<String>>,
@@ -84,11 +84,11 @@ impl Fake {
         self.flock
             .as_mut()
             .expect("a readable flock")
-            .push(SandboxedSheep {
+            .push(FlockEntry::Sandboxed(SandboxedSheep {
                 name: name.to_owned(),
                 settings: settings.into(),
                 cwd: cwd.into(),
-            });
+            }));
     }
 }
 
@@ -147,7 +147,7 @@ impl Env for Fake {
         self.removed.borrow_mut().push(path.to_owned());
     }
 
-    fn sandboxed_sheep(&self) -> Result<Vec<SandboxedSheep>, FlockError> {
+    fn sandboxed_sheep(&self) -> Result<Vec<FlockEntry>, FlockError> {
         self.flock.clone()
     }
 }
@@ -484,8 +484,8 @@ fn app(name: &str, cwd: Option<&str>, sandbox: Option<&str>) -> AppConfig {
     app
 }
 
-fn sandboxed(configs: &[AppConfig]) -> Vec<SandboxedSheep> {
-    flock::sandboxed(configs, Path::new("/home/ops"))
+fn sandboxed(configs: &[AppConfig]) -> Vec<FlockEntry> {
+    flock::sandboxed(configs)
 }
 
 #[test]
@@ -494,11 +494,11 @@ fn a_relative_sandbox_path_is_resolved_against_the_sheeps_cwd() {
 
     assert_eq!(
         sheep,
-        [SandboxedSheep {
+        [FlockEntry::Sandboxed(SandboxedSheep {
             name: "web".to_owned(),
             settings: "/srv/web/sandbox.json".into(),
             cwd: "/srv/web".into(),
-        }]
+        })]
     );
 }
 
@@ -506,8 +506,14 @@ fn a_relative_sandbox_path_is_resolved_against_the_sheeps_cwd() {
 fn an_absolute_sandbox_path_is_left_alone() {
     let sheep = sandboxed(&[app("web", Some("/srv/web"), Some("/etc/web.json"))]);
 
-    assert_eq!(sheep[0].settings, Path::new("/etc/web.json"));
-    assert_eq!(sheep[0].cwd, Path::new("/srv/web"));
+    assert_eq!(
+        sheep,
+        [FlockEntry::Sandboxed(SandboxedSheep {
+            name: "web".to_owned(),
+            settings: "/etc/web.json".into(),
+            cwd: "/srv/web".into(),
+        })]
+    );
 }
 
 #[test]
@@ -518,22 +524,38 @@ fn a_sheep_without_the_key_is_left_out() {
     ]);
 
     assert_eq!(sheep.len(), 1);
-    assert_eq!(sheep[0].name, "web");
+    assert!(matches!(&sheep[0], FlockEntry::Sandboxed(web) if web.name == "web"));
 }
 
 #[test]
-fn a_cwd_that_is_unset_or_relative_is_made_absolute_against_the_given_directory() {
+fn a_cwd_that_is_unset_or_relative_leaves_the_sheep_unchecked_not_guessed() {
     let sheep = sandboxed(&[
         app("bare", None, Some("sandbox.json")),
         app("rel", Some("srv/rel"), Some("sandbox.json")),
     ]);
 
-    assert_eq!(sheep[0].cwd, Path::new("/home/ops"));
-    assert_eq!(sheep[0].settings, Path::new("/home/ops/sandbox.json"));
-    assert_eq!(sheep[1].cwd, Path::new("/home/ops/srv/rel"));
+    for (entry, expected) in sheep.iter().zip(["bare", "rel"]) {
+        let FlockEntry::Unchecked { name, reason } = entry else {
+            panic!("{expected} was resolved: {entry:?}");
+        };
+        assert_eq!(name, expected);
+        assert!(reason.contains("absolute `cwd`"), "{reason}");
+    }
+}
+
+#[test]
+fn an_unchecked_sheep_is_skipped_by_name_with_its_reason() {
+    let mut fake = Fake::linux();
+    fake.flock = Ok(vec![FlockEntry::Unchecked {
+        name: "web".to_owned(),
+        reason: "its config could not be read: gone".to_owned(),
+    }]);
+
+    let report = run(&fake);
+
     assert_eq!(
-        sheep[1].settings,
-        Path::new("/home/ops/srv/rel/sandbox.json")
+        status(&report, "sheep web"),
+        &Status::Skip("its config could not be read: gone".to_owned())
     );
 }
 

@@ -1,7 +1,7 @@
 //! The sheep in the flock with `sandbox` set, read from the shepherd.
 
 use core::fmt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use shep_client::{
     Client, dogs,
@@ -11,7 +11,7 @@ use shep_client::{
     },
 };
 
-use super::SandboxedSheep;
+use super::{FlockEntry, SandboxedSheep};
 
 /// Why the flock could not be read for sandboxed sheep.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,21 +47,36 @@ fn failed(err: impl fmt::Display) -> FlockError {
 
 /// The sheep among `configs` with `sandbox` set.
 ///
-/// A `cwd` that is unset or relative is made absolute against `base`, and a
-/// relative `sandbox` file is read from the `cwd`, as the shepherd does.
-pub fn sandboxed(configs: &[AppConfig], base: &Path) -> Vec<SandboxedSheep> {
+/// The shepherd runs a sheep from its `cwd`, and from its own directory when
+/// that is unset or relative, which doctor cannot learn. Such a sheep is
+/// [`FlockEntry::Unchecked`] rather than guessed at.
+pub fn sandboxed(configs: &[AppConfig]) -> Vec<FlockEntry> {
     configs
         .iter()
         .filter_map(|config| {
             let file = config.sandbox.as_deref()?;
-            let cwd: PathBuf = base.join(config.cwd.as_deref().unwrap_or_default());
-            Some(SandboxedSheep {
-                name: config.name.clone(),
-                settings: cwd.join(file),
-                cwd,
+            let cwd = config.cwd.as_deref().map(Path::new);
+            Some(match cwd {
+                Some(cwd) if cwd.is_absolute() => FlockEntry::Sandboxed(SandboxedSheep {
+                    name: config.name.clone(),
+                    settings: cwd.join(file),
+                    cwd: cwd.to_owned(),
+                }),
+                _ => unchecked(
+                    &config.name,
+                    "its `cwd` is unset or relative, so doctor cannot tell where the \
+                     shepherd reads `sandbox` from; give the sheep an absolute `cwd`",
+                ),
             })
         })
         .collect()
+}
+
+fn unchecked(name: &str, reason: &str) -> FlockEntry {
+    FlockEntry::Unchecked {
+        name: name.to_owned(),
+        reason: reason.to_owned(),
+    }
 }
 
 /// Asks the shepherd for the config of each sheep in the flock and keeps the
@@ -70,9 +85,9 @@ pub fn sandboxed(configs: &[AppConfig], base: &Path) -> Vec<SandboxedSheep> {
 /// # Errors
 ///
 /// [`FlockError::Old`] when the shepherd predates `sandbox`, and
-/// [`FlockError::Failed`] when it cannot be reached or a request fails.
-pub async fn read() -> Result<Vec<SandboxedSheep>, FlockError> {
-    let base = std::env::current_dir().map_err(failed)?;
+/// [`FlockError::Failed`] when it cannot be reached or lists no flock. A
+/// sheep whose own config cannot be read is [`FlockEntry::Unchecked`].
+pub async fn read() -> Result<Vec<FlockEntry>, FlockError> {
     let paths = dogs::resolve_paths(&|key| std::env::var_os(key)).map_err(failed)?;
     let client = Client::connect(&paths.socket).await.map_err(failed)?;
     let protocol = client.daemon().protocol;
@@ -86,16 +101,27 @@ pub async fn read() -> Result<Vec<SandboxedSheep>, FlockError> {
             names.push(row.name);
         }
     }
-    let mut configs = Vec::with_capacity(names.len());
+    let mut entries = Vec::new();
     for name in names {
-        match client
-            .request(Request::SheepConfig { name })
+        let config = match client
+            .request(Request::SheepConfig { name: name.clone() })
             .await
-            .map_err(failed)?
         {
-            Response::SheepConfig(view) => configs.push(view.config),
-            other => return Err(failed(format!("answered {} to SheepConfig", other.name()))),
-        }
+            Ok(Response::SheepConfig(view)) => view.config,
+            Ok(other) => {
+                let reason = format!("the shepherd answered {} to SheepConfig", other.name());
+                entries.push(unchecked(&name, &reason));
+                continue;
+            }
+            Err(err) => {
+                entries.push(unchecked(
+                    &name,
+                    &format!("its config could not be read: {err}"),
+                ));
+                continue;
+            }
+        };
+        entries.extend(sandboxed(&[config]));
     }
-    Ok(sandboxed(&configs, &base))
+    Ok(entries)
 }
