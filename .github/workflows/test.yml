@@ -84,7 +84,10 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           profile=/etc/apparmor.d/bwrap-userns-restrict
           if [ -e "$profile" ]; then sudo apparmor_parser -R "$profile"; fi
-          sudo grep bwrap /sys/kernel/security/apparmor/profiles || echo "no bwrap profile loaded"
+          if sudo grep -s '^bwrap' /sys/kernel/security/apparmor/profiles; then
+            echo "::error::a bwrap AppArmor profile is still loaded"
+            exit 1
+          fi
       - name: Install crabpot
         run: cargo install crabpot --locked
       - name: Run the integration tier against it
