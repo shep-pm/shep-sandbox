@@ -75,8 +75,16 @@ jobs:
       # bubblewrap and, on Ubuntu 24.04+, unprivileged user namespaces.
       - name: Install bubblewrap
         run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      # Ubuntu's `bwrap-userns-restrict` profile confines what bwrap starts
+      # and strips its capabilities, so crabpot's helper cannot unshare even
+      # with the sysctl off. The profile is where the doctor's fix says to
+      # unload it from.
       - name: Allow unprivileged user namespaces
-        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          profile=/etc/apparmor.d/bwrap-userns-restrict
+          if [ -e "$profile" ]; then sudo apparmor_parser -R "$profile"; fi
+          sudo grep bwrap /sys/kernel/security/apparmor/profiles || echo "no bwrap profile loaded"
       - name: Install crabpot
         run: cargo install crabpot --locked
       - name: Run the integration tier against it
