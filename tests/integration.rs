@@ -187,6 +187,26 @@ fn doctor_reaches_the_binary_through_shep_and_prints_its_checks() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
+fn doctor_finds_descriptor_3_reaching_a_command_under_the_real_crabpot() {
+    let shepherd = Shepherd::new();
+    shepherd.adopt_dog();
+
+    let output = shepherd
+        .command()
+        .args(["sandbox", "doctor"])
+        .output()
+        .expect("shep ran");
+
+    let printed = String::from_utf8_lossy(&output.stdout);
+    let channel = printed
+        .lines()
+        .find(|line| line.contains("shepherd channel"))
+        .unwrap_or_else(|| panic!("no shepherd channel line: {printed}"));
+    assert!(channel.starts_with("ok "), "{channel}\n{printed}");
+}
+
+#[test]
 fn init_reaches_the_binary_through_shep_and_writes_the_file() {
     let shepherd = Shepherd::new();
     shepherd.adopt_dog();

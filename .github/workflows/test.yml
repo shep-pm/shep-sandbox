@@ -71,5 +71,11 @@ jobs:
       # one package with a binary, and `--bin` does not pick between them.
       - name: Build a real shep
         run: cargo install --git https://github.com/shep-pm/shep --branch main shep --bin shep --locked
+      # doctor's shepherd channel probe runs a real crabpot, which needs
+      # bubblewrap.
+      - name: Install bubblewrap
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - name: Install crabpot
+        run: cargo install crabpot --locked
       - name: Run the integration tier against it
         run: SHEP_BIN="$(command -v shep)" cargo test --features integration --locked

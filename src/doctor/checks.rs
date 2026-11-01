@@ -186,13 +186,20 @@ fn crabpot_in(settings: &Path, cwd: Option<&Path>, command: &[&str]) -> Command 
     }
 }
 
+/// The smallest settings crabpot accepts: it refuses a file without
+/// `network` and `filesystem`.
+const MINIMAL_SETTINGS: &str = r#"{
+  "network": { "allowedDomains": [], "deniedDomains": [] },
+  "filesystem": { "denyRead": [], "allowWrite": [], "denyWrite": [] }
+}"#;
+
 /// A descriptor the shepherd opens reaches a sandboxed command, on Linux.
 pub fn shepherd_channel(env: &dyn Env) -> Check {
     let name = "shepherd channel";
     if env.os() != Os::Linux {
         return check(name, Status::Skip("Linux only".to_owned()));
     }
-    let settings = match env.write_temp("{}") {
+    let settings = match env.write_temp(MINIMAL_SETTINGS) {
         Ok(path) => path,
         Err(err) => {
             return check(
