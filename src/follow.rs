@@ -89,14 +89,18 @@ pub async fn follow(
     let mut reported = false;
     loop {
         match shepherd.connect().await {
-            Ok(mut session) => {
-                wait = FIRST_WAIT;
-                if !follower.session(&mut session).await {
-                    return;
+            Ok(mut session) => match follower.session(&mut session).await {
+                Ended::Closed => return,
+                Ended::Lost => {
+                    wait = FIRST_WAIT;
+                    follower
+                        .say("lost the shepherd, keeping the sandbox as it is until it is back");
+                    reported = true;
                 }
-                follower.say("lost the shepherd, keeping the sandbox as it is until it is back");
-                reported = true;
-            }
+                // Said already, and the wait keeps growing: the shepherd is
+                // there, so a connection that works is no sign it is well.
+                Ended::Unreadable => {}
+            },
             Err(err) if !reported => {
                 follower.say(&format!(
                     "cannot reach the shepherd ({err}), edits to the table wait until it is back"
@@ -120,6 +124,16 @@ enum Flow {
     Closed,
 }
 
+/// How a connection ended.
+enum Ended {
+    /// The control pipe is closed.
+    Closed,
+    /// The shepherd went away after the table had been read.
+    Lost,
+    /// The first read of the table failed.
+    Unreadable,
+}
+
 struct Follower<'a, C, L> {
     sheep: &'a str,
     cwd: &'a Path,
@@ -129,14 +143,12 @@ struct Follower<'a, C, L> {
 }
 
 impl<C: Write, L: Write> Follower<'_, C, L> {
-    /// Follows one connection until it is lost, which is `true`, or the
-    /// control pipe closes, which is `false`. A table that cannot be read
-    /// ends the connection too.
-    async fn session(&mut self, session: &mut impl Session) -> bool {
+    /// Follows one connection until it ends.
+    async fn session(&mut self, session: &mut impl Session) -> Ended {
         match self.refresh(session).await {
             Flow::Go => {}
-            Flow::Lost => return true,
-            Flow::Closed => return false,
+            Flow::Lost => return Ended::Unreadable,
+            Flow::Closed => return Ended::Closed,
         }
         while let Some(heard) = session.heard().await {
             let mine = match &heard {
@@ -148,11 +160,11 @@ impl<C: Write, L: Write> Follower<'_, C, L> {
             }
             match self.refresh(session).await {
                 Flow::Go => {}
-                Flow::Lost => return true,
-                Flow::Closed => return false,
+                Flow::Lost => return Ended::Lost,
+                Flow::Closed => return Ended::Closed,
             }
         }
-        true
+        Ended::Lost
     }
 
     /// Reads the table and applies it.

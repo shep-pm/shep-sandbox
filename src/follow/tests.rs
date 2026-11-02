@@ -340,3 +340,24 @@ async fn a_key_changed_back_to_the_value_the_sandbox_runs_needs_no_restart() {
         "shep-sandbox: web: filesystem.denyRead changed, restart the sheep to apply it\n"
     );
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_table_the_shepherd_keeps_refusing_is_retried_with_a_growing_wait() {
+    let mut shepherd = FakeShepherd::default();
+    for _ in 0..4 {
+        shepherd.then(FakeSession::default().table_fails());
+    }
+
+    let said = followed(&mut shepherd, settings(json!({}))).await;
+
+    assert_eq!(said.control, "");
+    assert!(!said.log.contains("lost the shepherd"), "{}", said.log);
+    let waits: Vec<_> = shepherd
+        .connected_at
+        .windows(2)
+        .map(|pair| pair[1] - pair[0])
+        .collect();
+    // The connect after the last scripted one never answers, so it ends the run.
+    let secs: Vec<u64> = waits.iter().map(Duration::as_secs).collect();
+    assert_eq!(secs, [1, 2, 4, 8]);
+}
