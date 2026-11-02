@@ -18,6 +18,10 @@ jobs:
     steps:
       - name: Enable auto-merge
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The PAT, not GITHUB_TOKEN: a merge made with GITHUB_TOKEN starts no
+          # workflows, so release-plz would never see the bump land on main.
+          # Dependabot's pull requests read Dependabot secrets, not Actions
+          # secrets: set `gh secret set RELEASE_PLZ_TOKEN --app dependabot`.
+          GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: gh pr merge --auto --merge "$PR_URL"
