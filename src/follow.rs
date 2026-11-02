@@ -110,6 +110,16 @@ pub async fn follow(
     }
 }
 
+/// What a read of the table leaves the session to do.
+enum Flow {
+    /// Keep following.
+    Go,
+    /// Drop the connection, so the follower reconnects and reads again.
+    Lost,
+    /// The control pipe is closed.
+    Closed,
+}
+
 struct Follower<'a, C, L> {
     sheep: &'a str,
     cwd: &'a Path,
@@ -120,49 +130,58 @@ struct Follower<'a, C, L> {
 
 impl<C: Write, L: Write> Follower<'_, C, L> {
     /// Follows one connection until it is lost, which is `true`, or the
-    /// control pipe closes, which is `false`.
+    /// control pipe closes, which is `false`. A table that cannot be read
+    /// ends the connection too.
     async fn session(&mut self, session: &mut impl Session) -> bool {
-        if !self.refresh(session).await {
-            return false;
+        match self.refresh(session).await {
+            Flow::Go => {}
+            Flow::Lost => return true,
+            Flow::Closed => return false,
         }
         while let Some(heard) = session.heard().await {
             let mine = match &heard {
                 Heard::Sheep(sheep) => sheep == self.sheep,
                 Heard::Lagged => true,
             };
-            if mine && !self.refresh(session).await {
-                return false;
+            if !mine {
+                continue;
+            }
+            match self.refresh(session).await {
+                Flow::Go => {}
+                Flow::Lost => return true,
+                Flow::Closed => return false,
             }
         }
         true
     }
 
-    /// Reads the table and applies it. `false` once the control pipe is
-    /// closed.
-    async fn refresh(&mut self, session: &mut impl Session) -> bool {
+    /// Reads the table and applies it.
+    async fn refresh(&mut self, session: &mut impl Session) -> Flow {
         let table = match session.table(self.sheep).await {
             Ok(Some(table)) => table,
             Ok(None) => {
-                self.say("the table was removed, the next start runs without the sandbox");
-                return true;
+                self.say("the table was removed, the next start is refused");
+                return Flow::Go;
             }
             Err(err) => {
+                // Ending the session reads the table again once reconnected.
                 self.say(&format!("cannot read the table: {err}"));
-                return true;
+                return Flow::Lost;
             }
         };
         match effective_settings(table, self.cwd) {
             Ok(settings) => self.apply(settings),
             Err(refusal) => {
                 self.say(&format!("{refusal}, the settings in force stay"));
-                true
+                Flow::Go
             }
         }
     }
 
     /// Sends the network lists if one changed, and names every other key that
-    /// did. `false` once the control pipe is closed.
-    fn apply(&mut self, settings: Map<String, Value>) -> bool {
+    /// did. Only the network lists become the settings in force, because
+    /// the sandbox runs no other key's new value.
+    fn apply(&mut self, settings: Map<String, Value>) -> Flow {
         let changed = changed_keys(&self.last, &settings);
         if changed.iter().any(|key| LIVE_KEYS.contains(&key.as_str())) {
             let mut line = serde_json::to_vec(&settings).expect("a JSON object has a text form");
@@ -173,7 +192,7 @@ impl<C: Write, L: Write> Follower<'_, C, L> {
                 .and_then(|()| self.control.flush())
                 .is_err()
             {
-                return false;
+                return Flow::Closed;
             }
         }
         for key in changed
@@ -182,8 +201,10 @@ impl<C: Write, L: Write> Follower<'_, C, L> {
         {
             self.say(&format!("{key} changed, restart the sheep to apply it"));
         }
-        self.last = settings;
-        true
+        for key in LIVE_KEYS {
+            self.last = with_key(&self.last, key, &settings);
+        }
+        Flow::Go
     }
 
     /// One line of the sheep's err log.
@@ -193,6 +214,24 @@ impl<C: Write, L: Write> Follower<'_, C, L> {
         let line = format!("shep-sandbox: {}: {message}\n", self.sheep);
         let _ = self.log.write_all(line.as_bytes());
     }
+}
+
+/// `base` with the value of `key` (`group.name`) taken from `from`, or without
+/// it where `from` has none.
+fn with_key(base: &Map<String, Value>, key: &str, from: &Map<String, Value>) -> Map<String, Value> {
+    let (group, name) = key.split_once('.').expect("a live key names a group");
+    let value = from.get(group).and_then(|group| group.get(name)).cloned();
+    let mut next = base.clone();
+    let slot = next
+        .entry(group)
+        .or_insert_with(|| Value::Object(Map::new()));
+    if let Value::Object(slot) = slot {
+        match value {
+            Some(value) => slot.insert(name.to_owned(), value),
+            None => slot.remove(name),
+        };
+    }
+    next
 }
 
 /// The keys whose value differs between `old` and `new`, sorted. A key inside

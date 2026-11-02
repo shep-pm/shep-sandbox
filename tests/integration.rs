@@ -420,8 +420,10 @@ fn an_edited_allowed_domains_list_reaches_a_running_sheep_without_a_restart() {
 
     shepherd.edit_boxed("network.allowedDomains", "[\"shep-sandbox-it.invalid\"]");
 
+    // An allowed host that does not resolve is the proxy's 502, which a failed
+    // request (curl's 000) or a refusal (403) is not.
     wait_until("the proxy to let the host through", || {
-        fs::read_to_string(cwd.path().join("code.txt")).is_ok_and(|code| code != "403")
+        fs::read_to_string(cwd.path().join("code.txt")).is_ok_and(|code| code == "502")
     });
     assert_eq!(
         fs::read_to_string(cwd.path().join("starts.txt")).expect("the sheep started"),

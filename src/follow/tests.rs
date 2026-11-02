@@ -42,6 +42,12 @@ impl FakeSession {
         self
     }
 
+    fn table_fails(mut self) -> Self {
+        self.tables
+            .push_back(Err(ShepherdError::from(ConnectError::HandshakeClosed)));
+        self
+    }
+
     fn hears(mut self, sheep: &str) -> Self {
         self.heard.push_back(Heard::Sheep(sheep.to_owned()));
         self
@@ -245,7 +251,7 @@ async fn a_removed_table_is_logged_and_nothing_is_sent() {
     assert_eq!(said.control, "");
     assert_eq!(
         said.log,
-        "shep-sandbox: web: the table was removed, the next start runs without the sandbox\n"
+        "shep-sandbox: web: the table was removed, the next start is refused\n"
     );
 }
 
@@ -293,5 +299,44 @@ async fn a_lost_connection_keeps_the_last_lists_and_refetches_on_reconnect() {
         "the wait grows: {:?} then {:?}",
         second - first,
         third - second
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_table_that_cannot_be_read_is_read_again_after_reconnecting() {
+    let mut shepherd = FakeShepherd::with(
+        FakeSession::default()
+            .table(json!({}))
+            .table_fails()
+            .hears("web"),
+    );
+    shepherd.then(
+        FakeSession::default().table(json!({"network": {"allowedDomains": ["example.com"]}})),
+    );
+
+    let said = followed(&mut shepherd, settings(json!({}))).await;
+
+    let line: Value = serde_json::from_str(&said.control).expect("the edit that could not be read");
+    assert_eq!(line["network"]["allowedDomains"], json!(["example.com"]));
+    assert!(said.log.contains("cannot read the table"), "{}", said.log);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_key_changed_back_to_the_value_the_sandbox_runs_needs_no_restart() {
+    let mut shepherd = FakeShepherd::with(
+        FakeSession::default()
+            .table(json!({}))
+            .table(json!({"filesystem": {"denyRead": ["/etc/secrets"]}}))
+            .hears("web")
+            .table(json!({}))
+            .hears("web"),
+    );
+
+    let said = followed(&mut shepherd, settings(json!({}))).await;
+
+    assert_eq!(said.control, "");
+    assert_eq!(
+        said.log,
+        "shep-sandbox: web: filesystem.denyRead changed, restart the sheep to apply it\n"
     );
 }
