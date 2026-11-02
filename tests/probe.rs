@@ -132,6 +132,15 @@ fn the_manifest_asks_for_a_channel_and_for_validation() {
     assert_eq!(manifest["validate"], true, "{manifest}");
 }
 
+#[test]
+fn the_manifest_declares_launch() {
+    let output = run(&[MANIFEST_FLAG]);
+
+    assert!(output.status.success());
+    let manifest: serde_json::Value = serde_json::from_str(&stdout(&output)).expect("JSON");
+    assert_eq!(manifest["launch"], true, "{manifest}");
+}
+
 /// The node a `$ref` points at, or the node itself when it holds none.
 fn resolved<'a>(root: &'a serde_json::Value, node: &'a serde_json::Value) -> &'a serde_json::Value {
     match node.get("$ref").and_then(serde_json::Value::as_str) {

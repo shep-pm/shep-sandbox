@@ -36,6 +36,7 @@ fn main() -> ExitCode {
     Probe::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
         .ask_for_channel()
         .validate()
+        .launch()
         .answer_with_sheep::<Section, SheepSettings>();
 
     let mut args = std::env::args_os().skip(1);
