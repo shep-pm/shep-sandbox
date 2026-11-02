@@ -33,16 +33,6 @@ fn run_named(name: Option<&str>, args: &[&str]) -> Output {
     command.output().expect("the dog binary ran")
 }
 
-fn run_in(dir: &std::path::Path, args: &[&str]) -> Output {
-    Command::new(DOG_BIN)
-        .args(args)
-        .current_dir(dir)
-        .env_remove("SHEP_DOG_NAME")
-        .env("SHEP_HOME", "/nonexistent/shep-home")
-        .output()
-        .expect("the dog binary ran")
-}
-
 fn stdout(output: &Output) -> String {
     String::from_utf8(output.stdout.clone()).expect("stdout is UTF-8")
 }
@@ -73,86 +63,15 @@ fn the_schema_answer_is_json_for_a_section_with_no_keys() {
 }
 
 #[test]
-fn the_manifest_declares_the_sandbox_verb_with_init_and_doctor() {
+fn the_manifest_declares_no_verb() {
     let output = run(&[MANIFEST_FLAG]);
 
     assert!(output.status.success());
     let manifest: serde_json::Value = serde_json::from_str(&stdout(&output)).expect("JSON");
-    let subcommands: Vec<&str> = manifest["verb"]["subcommands"]
-        .as_array()
-        .expect("a verb with subcommands")
-        .iter()
-        .map(|subcommand| subcommand["name"].as_str().expect("a name"))
-        .collect();
-    assert_eq!(subcommands, ["init", "doctor"]);
-}
-
-#[test]
-fn doctor_with_no_crabpot_on_path_names_the_check_and_exits_1() {
-    let output = Command::new(DOG_BIN)
-        .arg("doctor")
-        .env("PATH", "")
-        .output()
-        .expect("the dog binary ran");
-
-    assert_eq!(output.status.code(), Some(1));
-    let printed = stdout(&output);
-    assert!(printed.contains("FAIL  crabpot"), "{printed}");
-    assert!(printed.contains("cargo install crabpot"), "{printed}");
-}
-
-#[test]
-fn doctor_takes_no_arguments() {
-    let output = run(&["doctor", "--verbose"]);
-
-    assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("takes no arguments"));
-}
-
-#[test]
-fn init_writes_the_skeleton_where_the_path_says_and_will_not_overwrite_it() {
-    let dir = tempfile::tempdir().unwrap();
-    let target = dir.path().join("sandbox.json");
-
-    let first = run_in(dir.path(), &["init", target.to_str().unwrap()]);
-    let second = run_in(dir.path(), &["init", target.to_str().unwrap()]);
-
-    assert!(first.status.success(), "{first:?}");
-    let written: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&target).unwrap()).expect("JSON");
-    assert!(written["filesystem"]["allowWrite"].is_array());
-    assert_eq!(second.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&second.stderr).contains("already exists"));
-}
-
-#[test]
-fn init_with_no_path_writes_sandbox_json_in_the_current_directory() {
-    let dir = tempfile::tempdir().unwrap();
-
-    let output = run_in(dir.path(), &["init"]);
-
-    assert!(output.status.success(), "{output:?}");
-    assert!(dir.path().join("sandbox.json").is_file());
-}
-
-#[test]
-fn init_from_a_sheep_with_no_shepherd_writes_nothing_and_says_so() {
-    let dir = tempfile::tempdir().unwrap();
-
-    let output = run_in(dir.path(), &["init", "--from", "web"]);
-
-    assert_eq!(output.status.code(), Some(5), "{output:?}");
-    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot reach the shepherd"));
-    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
-}
-
-#[test]
-fn init_with_from_and_no_sheep_is_a_usage_error() {
-    let dir = tempfile::tempdir().unwrap();
-
-    let output = run_in(dir.path(), &["init", "--from"]);
-
-    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(
+        manifest.get("verb").is_none_or(|verb| verb.is_null()),
+        "{manifest}"
+    );
 }
 
 #[test]
@@ -172,17 +91,15 @@ fn run_by_hand_with_no_shepherd_the_dog_says_why_it_stopped() {
 }
 
 #[test]
-fn shep_sandbox_with_no_subcommand_prints_usage_and_exits_2() {
+fn a_named_run_with_no_connection_to_a_shepherd_exits_2_and_says_it_runs_only_as_a_supervised_dog()
+{
     // `shep sandbox` names the dog without handing it a connection, so it is
     // not the supervised dog and must not connect as one.
     let output = run_named(Some("sandbox"), &[]);
 
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("init") && stderr.contains("doctor"),
-        "{stderr}"
-    );
+    assert!(stderr.contains("only as a supervised dog"), "{stderr}");
 }
 
 #[test]
