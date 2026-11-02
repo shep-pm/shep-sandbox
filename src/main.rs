@@ -12,6 +12,7 @@
 
 mod config;
 mod error;
+mod follow;
 mod launch;
 mod settings;
 

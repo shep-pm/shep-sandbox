@@ -43,6 +43,17 @@ A sheep's `[app.dogs.sandbox]` table takes crabpot's settings keys, spelled as c
 - A key crabpot does not know is dropped, as crabpot drops it.
 - A macOS sheep that runs file watchers needs `allowMachLookup: ["com.apple.FSEvents"]` under `network`. The dog does not add it.
 
+## Editing a running sheep's table
+
+`launch` stays connected to the shepherd for as long as the sheep runs and follows its `[app.dogs.sandbox]` table. It reads the table again on every change event.
+
+- Live: `network.allowedDomains`, `network.deniedDomains` and `network.deniedResolvedAddresses`. A change reaches the running sandbox through crabpot's `--control-fd`, with no restart.
+- Everything else needs a restart, `network.allowTcp` and every `filesystem` key included. The running sandbox keeps its old value, and the notice repeats on a later edit while the key still differs from it. `launch` writes one line to stderr, which lands in the sheep's err log, naming the key: `shep-sandbox: web: filesystem.denyRead changed, restart the sheep to apply it`.
+- A table crabpot refuses is logged the same way, and the settings in force stay.
+- A removed table is logged, saying the next start is refused. The running sandbox stays as it is.
+- A lost shepherd connection is logged once. The sandbox keeps its last lists while `launch` reconnects, waiting 1 second and doubling up to 30, and reads the table again once it is back.
+- Nothing restarts the sheep.
+
 `shep-sandbox --version`, `--schema` and `--shep-manifest` answer without a shepherd running.
 
 ## License

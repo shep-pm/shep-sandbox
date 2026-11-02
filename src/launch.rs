@@ -6,7 +6,12 @@
 //! which exits 125 as crabpot does for a sandbox it refuses.
 
 use core::fmt;
-use std::{ffi::OsString, io, path::Path, process::ExitCode};
+use std::{
+    ffi::OsString,
+    io,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
 use serde_json::{Map, Value};
 use shep_client::dogs::{HomeError, ShepherdError};
@@ -29,6 +34,10 @@ pub struct Invocation {
 /// What `launch` hands the sandbox: the settings and the command, both final.
 #[derive(Debug)]
 pub struct Plan {
+    /// The sheep the command runs as.
+    pub sheep: String,
+    /// The sheep's cwd, which `settings` makes writable.
+    pub cwd: PathBuf,
     /// The settings document crabpot reads, with the sheep's cwd writable.
     pub settings: Map<String, Value>,
     /// The program and its arguments.
@@ -60,6 +69,8 @@ pub enum Refusal {
     Cwd(io::Error),
     /// The settings could not be written to the file crabpot reads them from.
     SettingsFile(io::Error),
+    /// The pipe that carries later edits to crabpot could not be made.
+    ControlPipe(io::Error),
     /// The runtime that asks the shepherd could not start.
     Runtime(io::Error),
     /// This platform has no crabpot sandbox.
@@ -90,6 +101,7 @@ impl fmt::Display for Refusal {
             Self::Settings(err) => write!(f, "the sheep's table is refused: {err}"),
             Self::Cwd(err) => write!(f, "cannot read the current directory: {err}"),
             Self::SettingsFile(err) => write!(f, "cannot write the settings file: {err}"),
+            Self::ControlPipe(err) => write!(f, "cannot open the control pipe: {err}"),
             Self::Runtime(err) => write!(f, "cannot start the runtime: {err}"),
             Self::Unsupported => f.write_str("launch is not supported on this platform"),
         }
@@ -102,7 +114,10 @@ impl core::error::Error for Refusal {
             Self::Home(err) => Some(err),
             Self::Shepherd(err) => Some(err),
             Self::Settings(err) => Some(err),
-            Self::Cwd(err) | Self::SettingsFile(err) | Self::Runtime(err) => Some(err),
+            Self::Cwd(err)
+            | Self::SettingsFile(err)
+            | Self::ControlPipe(err)
+            | Self::Runtime(err) => Some(err),
             Self::NoSheep
             | Self::NoCommand
             | Self::NoHome
@@ -175,9 +190,16 @@ pub fn launch(
 ) -> Refusal {
     let plan = (|| {
         let Invocation { sheep, command } = parse_args(args)?;
-        let table = fetch(&sheep)?.ok_or(Refusal::NoTable { sheep })?;
+        let table = fetch(&sheep)?.ok_or_else(|| Refusal::NoTable {
+            sheep: sheep.clone(),
+        })?;
         let settings = effective_settings(table, cwd)?;
-        Ok(Plan { settings, command })
+        Ok(Plan {
+            sheep,
+            cwd: cwd.to_owned(),
+            settings,
+            command,
+        })
     })();
     match plan {
         Ok(plan) => execute(plan),
@@ -227,7 +249,8 @@ fn fetch_table(sheep: &str) -> Result<Option<Map<String, Value>>, Refusal> {
 }
 
 /// Writes the settings to an unlinked file and runs crabpot on it, which
-/// exits the process with the command's status.
+/// exits the process with the command's status. A thread follows the sheep's
+/// table meanwhile, and writes the network lists to crabpot's control pipe.
 #[cfg(unix)]
 fn execute(plan: Plan) -> Refusal {
     use std::os::fd::AsRawFd;
@@ -236,15 +259,42 @@ fn execute(plan: Plan) -> Refusal {
         Ok(file) => file,
         Err(err) => return Refusal::SettingsFile(err),
     };
+    let (control, writer) = match std::io::pipe() {
+        Ok(pipe) => pipe,
+        Err(err) => return Refusal::ControlPipe(err),
+    };
     let mut args: Vec<OsString> = vec![
         "-s".into(),
         format!("/dev/fd/{}", file.as_raw_fd()).into(),
+        "--control-fd".into(),
+        control.as_raw_fd().to_string().into(),
         "--".into(),
     ];
     args.extend(plan.command);
-    // `file` stays open until the process exits, because `run_args` never
-    // returns.
+    follow_table(plan.sheep, plan.cwd, plan.settings, writer);
+    // `file` and `control` stay open until the process exits, because
+    // `run_args` never returns.
     crabpot::run_args(args)
+}
+
+/// Starts the thread that follows the sheep's table. The sandbox runs without
+/// it when it cannot start: the settings it starts with are final.
+#[cfg(unix)]
+fn follow_table(
+    sheep: String,
+    cwd: PathBuf,
+    settings: Map<String, Value>,
+    control: std::io::PipeWriter,
+) {
+    let socket = shep_client::dogs::resolve_paths(&|key| std::env::var_os(key)).map(|p| p.socket);
+    let started = match socket {
+        Ok(socket) => crate::follow::spawn(socket, sheep.clone(), cwd, settings, control)
+            .map_err(|err| err.to_string()),
+        Err(err) => Err(err.to_string()),
+    };
+    if let Err(err) = started {
+        eprintln!("shep-sandbox: {sheep}: edits to the table will not reach the sandbox: {err}");
+    }
 }
 
 #[cfg(not(unix))]

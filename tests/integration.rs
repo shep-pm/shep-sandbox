@@ -349,3 +349,116 @@ fn the_sandboxed_command_cannot_connect_to_the_shepherds_control_socket() {
         .expect("the dog ran");
     assert_eq!(outside.status.code(), Some(0), "{outside:?}");
 }
+
+impl Shepherd {
+    /// Replace one key of the `boxed` sheep's `[app.dogs.sandbox]` table
+    /// while it runs.
+    fn edit_boxed(&self, key: &str, value: &str) {
+        self.ok(&[
+            "set",
+            &format!("boxed.dogs.{LAUNCH_NAME}.{key}"),
+            value,
+            "--yes",
+            "--style",
+            "bare",
+        ]);
+    }
+
+    /// The `boxed` sheep's err log.
+    fn boxed_err_log(&self) -> String {
+        self.ok(&[
+            "bleats",
+            "boxed",
+            "--err",
+            "--no-follow",
+            "--lines",
+            "100",
+            "--style",
+            "bare",
+        ])
+    }
+}
+
+/// A sheep that reports every 0.2 seconds, and counts its starts. It says what
+/// the proxy answers for a host nobody resolves, which is 403 while the host
+/// is not on the allow list.
+const REPORTING_SHEEP: &str = r"echo start >> starts.txt
+beat=0
+while :; do
+  beat=$((beat + 1))
+  echo $beat > beat.tmp && mv beat.tmp beat.txt
+  curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://shep-sandbox-it.invalid/ > code.tmp
+  mv code.tmp code.txt
+  sleep 0.2
+done";
+
+/// The `beat.txt` count, once it has one.
+fn beat(cwd: &Path) -> Option<u64> {
+    fs::read_to_string(cwd.join("beat.txt"))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+#[test]
+fn an_edited_allowed_domains_list_reaches_a_running_sheep_without_a_restart() {
+    let shepherd = Shepherd::new();
+    shepherd.boot();
+    shepherd.adopt_launch_dog();
+    let cwd = tempfile::tempdir().expect("the sheep's cwd");
+    let script = script(cwd.path(), "run.sh", REPORTING_SHEEP);
+    let started = shepherd.start_boxed(
+        cwd.path(),
+        &script,
+        "network.allowedDomains = [\"other.example\"]",
+    );
+    assert!(started.status.success(), "{started:?}");
+    wait_until("the proxy to refuse the host", || {
+        fs::read_to_string(cwd.path().join("code.txt")).is_ok_and(|code| code == "403")
+    });
+
+    shepherd.edit_boxed("network.allowedDomains", "[\"shep-sandbox-it.invalid\"]");
+
+    // An allowed host that does not resolve is the proxy's 502, which a failed
+    // request (curl's 000) or a refusal (403) is not.
+    wait_until("the proxy to let the host through", || {
+        fs::read_to_string(cwd.path().join("code.txt")).is_ok_and(|code| code == "502")
+    });
+    assert_eq!(
+        fs::read_to_string(cwd.path().join("starts.txt")).expect("the sheep started"),
+        "start\n",
+        "the sheep restarted"
+    );
+    assert_eq!(shepherd.boxed_exit(), None, "the sheep exited");
+}
+
+#[test]
+fn an_edited_deny_read_list_logs_restart_needed_and_leaves_the_sheep_running() {
+    let shepherd = Shepherd::new();
+    shepherd.boot();
+    shepherd.adopt_launch_dog();
+    let cwd = tempfile::tempdir().expect("the sheep's cwd");
+    let script = script(cwd.path(), "run.sh", REPORTING_SHEEP);
+    let started = shepherd.start_boxed(cwd.path(), &script, "filesystem.denyRead = []");
+    assert!(started.status.success(), "{started:?}");
+    wait_until("the sheep to report", || beat(cwd.path()).is_some());
+
+    shepherd.edit_boxed("filesystem.denyRead", "[\"/etc/shep-sandbox-it\"]");
+
+    wait_until("the restart notice in the err log", || {
+        shepherd
+            .boxed_err_log()
+            .contains("filesystem.denyRead changed, restart the sheep to apply it")
+    });
+    let before = beat(cwd.path()).expect("the sheep reports");
+    wait_until("the sheep to report again", || {
+        beat(cwd.path()).is_some_and(|now| now > before)
+    });
+    assert_eq!(
+        fs::read_to_string(cwd.path().join("starts.txt")).expect("the sheep started"),
+        "start\n",
+        "the sheep restarted"
+    );
+    assert_eq!(shepherd.boxed_exit(), None, "the sheep exited");
+}
