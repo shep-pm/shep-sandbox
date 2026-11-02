@@ -12,7 +12,7 @@ readme = "README.md"
 keywords = ["shep"]
 # docs/ holds planning and design notes. They belong in the repository, not in
 # a published .crate, which is permanent.
-exclude = ["/docs/"]
+exclude = ["/assets/", "/docs/"]
 
 [features]
 # Option: builds the tests that drive a real shepherd. Off by default because
