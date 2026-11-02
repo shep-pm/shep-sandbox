@@ -25,11 +25,12 @@ integration = []
 # dependency is the library alone.
 crabpot = { version = "0.10.5", default-features = false, features = ["schema"] }
 # 0.17.0 is the first release whose `Probe` answers the manifest flag and
-# carries a `Verb`, which `shep sandbox` needs. 0.21.0 is the shep this dog
-# is tested against. `schema` answers `--schema`.
-shep-client = { version = "0.21.0", default-features = false, features = ["schema"] }
+# carries a `Verb`, which `shep sandbox` needs. 0.22.0 is the first release
+# whose `Probe` declares `launch`, and the shep this dog is tested against.
+# `schema` answers `--schema`.
+shep-client = { version = "0.22.0", default-features = false, features = ["schema"] }
 # The version shep-client pins. `client` is what `serve` and `on_action` need.
-shep-channel = { version = "0.21.0", default-features = false, features = ["client"] }
+shep-channel = { version = "0.22.0", default-features = false, features = ["client"] }
 # `#[derive(JsonSchema)]` expands to absolute `schemars::` paths, so the crate
 # has to be nameable here even though shep-client already carries it.
 schemars = { version = "1.2.2", default-features = false, features = ["derive", "std"] }
@@ -37,9 +38,7 @@ serde = { version = "1", default-features = false, features = ["derive"] }
 # Builds the settings document handed to crabpot.
 serde_json = { version = "1", default-features = false, features = ["std"] }
 tokio = { version = "1", default-features = false, features = ["rt", "macros"] }
-
-[dev-dependencies]
-# Only to give each integration test its own $SHEP_HOME.
+# An unlinked file for the settings crabpot reads through `/dev/fd`.
 tempfile = { version = "3", default-features = false }
 
 [[test]]

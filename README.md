@@ -16,7 +16,23 @@ shep adopt shep-sandbox --yes
 
 shep names the dog `sandbox`. Adopted, it connects to the shepherd, reads its `[sandbox]` section of `dogs.toml` (which has no keys yet) and idles until the shepherd stops it. It also checks each sheep's `[app.dogs.sandbox]` table before `shep` writes it.
 
-It declares no verb. The `init` and `doctor` verbs of the first design are removed, and return once ported to the settings table the dog launches a sheep from.
+The `init` and `doctor` verbs of the first design are removed, and return once ported to the settings table the dog launches a sheep from.
+
+## Launch a sheep
+
+```sh
+shep-sandbox launch <sheep> -- <command> [args...]
+```
+
+The shepherd spawns a sandboxed sheep this way. `launch` reads `$SHEP_HOME`, which the shepherd passes, asks the shepherd for the sheep's `[app.dogs.sandbox]` table, adds the current directory (the sheep's cwd) to `filesystem.allowWrite`, and runs the command under crabpot with that table. The command's exit status is `launch`'s.
+
+- Every refusal exits 125, as crabpot does, with one line on stderr naming the cause: no sheep name before `--`, no `$SHEP_HOME`, a shepherd that cannot be reached, no table for the sheep, a table crabpot refuses, no command after `--`, or crabpot's own refusal.
+- A command that crabpot never reached never runs. `launch` has no fallback that runs it outside the sandbox.
+- On Windows `launch` exits 125 saying the platform is not supported.
+- On Linux the sandbox runs this binary again inside itself, so the dog's binary must be readable inside the sandbox.
+- The command sees `$SHEP_HOME` unchanged, because crabpot passes the environment through.
+
+Do not let a sheep reach the shepherd's control socket. That socket trusts any process of the same user, so a sheep that can connect to it holds the operator's authority over the whole flock. `network.allowAllUnixSockets`, or a `network.allowUnixSockets` entry that reaches `$SHEP_HOME/run/shep.sock`, grants exactly that.
 
 ## A sheep's keys
 

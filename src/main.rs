@@ -2,14 +2,17 @@
 //!
 //! Adopted, the dog reads its `[sandbox]` section, checks each sheep's
 //! `[app.dogs.sandbox]` table against crabpot before `shep` writes it, and
-//! idles until the shepherd stops it. It declares no verb.
+//! idles until the shepherd stops it. `launch <sheep> -- <command>` runs a
+//! command under crabpot with the sheep's table instead.
 //!
 //! `shep adopt` asks `--version`, `--schema` and `--shep-manifest` of a
-//! candidate it has not registered. [`Probe::answer`] replies on the first
-//! line of [`main`], before this process opens a socket or reads `$SHEP_HOME`.
+//! candidate it has not registered. The probe chain in [`main`] replies after
+//! `crabpot::run_from_args()` and before this process opens a socket or reads
+//! `$SHEP_HOME`.
 
 mod config;
 mod error;
+mod launch;
 mod settings;
 
 use std::{ffi::OsString, process::ExitCode};
@@ -26,13 +29,27 @@ use crate::{config::Section, error::Error, settings::SheepSettings};
 /// picks for this binary.
 const DEFAULT_NAME: &str = "sandbox";
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> ExitCode {
+fn main() -> ExitCode {
+    // First, because the Linux sandbox re-enters this binary with
+    // `--crabpot-helper`, and anything else that ran first would run in there.
+    crabpot::run_from_args();
+
     Probe::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
         .ask_for_channel()
         .validate()
+        .launch()
         .answer_with_sheep::<Section, SheepSettings>();
 
+    let mut args = std::env::args_os().skip(1);
+    if args.next().is_some_and(|word| word == "launch") {
+        let args: Vec<OsString> = args.collect();
+        return launch::run(&args);
+    }
+    adopted()
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn adopted() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match run(&args).await {
         Ok(()) => ExitCode::SUCCESS,

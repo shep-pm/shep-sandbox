@@ -16,16 +16,20 @@
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Output},
     time::{Duration, Instant},
 };
 
 const DOG_BIN: &str = env!("CARGO_BIN_EXE_shep-sandbox");
 
-/// The name the test adopts the dog under. shep refuses a dog named `sandbox`
-/// whose manifest does not declare `launch`, which this dog does not yet.
+/// The name the connection test adopts the dog under, so it does not claim
+/// the `sandbox` name that routes a sheep's launch.
 const DOG_NAME: &str = "sandbox-it";
+
+/// The name a sheep's launch goes through: the shepherd spawns a sheep that
+/// carries an `[app.dogs.sandbox]` table by this dog.
+const LAUNCH_NAME: &str = "sandbox";
 
 /// A ceiling on every poll, so a dog that never connects fails the test with
 /// a sentence rather than hanging the job until CI's timeout.
@@ -110,15 +114,72 @@ impl Shepherd {
         ]);
     }
 
+    /// Adopt the dog as [`LAUNCH_NAME`], which is the name the shepherd
+    /// spawns a sandboxed sheep through.
+    fn adopt_launch_dog(&self) {
+        self.ok(&[
+            "adopt",
+            DOG_BIN,
+            "--name",
+            LAUNCH_NAME,
+            "--yes",
+            "--style",
+            "bare",
+        ]);
+        // Adoption starts the dog asynchronously, and a sheep started before
+        // it handshakes can race the validation request.
+        wait_until("the launch dog's handshake", || {
+            let dog = self.dog_named(LAUNCH_NAME);
+            dog["status"] == "online" && dog["handshook"] == true
+        });
+    }
+
+    /// Start the one sheep a Flockfile holds, which runs `script` from `cwd`
+    /// under the table `[app.dogs.sandbox]` holds.
+    fn start_boxed(&self, cwd: &Path, script: &Path, table: &str) -> Output {
+        let flockfile = self.home.path().join("Flockfile.toml");
+        fs::write(
+            &flockfile,
+            format!(
+                "[[app]]\nname = \"boxed\"\nscript = \"{}\"\ncwd = \"{}\"\nautorestart = false\n\n[app.dogs.sandbox]\n{table}\n",
+                script.display(),
+                cwd.display()
+            ),
+        )
+        .expect("a Flockfile");
+        self.run(&[
+            "start",
+            flockfile.to_str().expect("Flockfile path"),
+            "--style",
+            "bare",
+        ])
+    }
+
+    /// The `last_exit` code of the sheep named `boxed`, once it has one.
+    fn boxed_exit(&self) -> Option<i64> {
+        let listing: serde_json::Value =
+            serde_json::from_str(&self.ok(&["list", "--format", "json"])).expect("JSON listing");
+        listing["data"]
+            .as_array()?
+            .iter()
+            .find(|sheep| sheep["name"] == "boxed")?["last_exit"]["code"]
+            .as_i64()
+    }
+
     /// The [`DOG_NAME`] entry of `shep dogs`.
     fn dog(&self) -> serde_json::Value {
+        self.dog_named(DOG_NAME)
+    }
+
+    /// The `name` entry of `shep dogs`.
+    fn dog_named(&self, name: &str) -> serde_json::Value {
         let listing: serde_json::Value =
             serde_json::from_str(&self.ok(&["dogs", "--format", "json"])).expect("JSON listing");
         listing["data"]
             .as_array()
             .expect("a data array")
             .iter()
-            .find(|dog| dog["name"] == DOG_NAME)
+            .find(|dog| dog["name"] == name)
             .cloned()
             .expect("the adopted dog is listed")
     }
@@ -161,4 +222,130 @@ fn an_adopted_dog_connects_and_exits_0_when_stopped() {
         shepherd.dog()["last_exit"]["code"] == 0
     });
     assert_eq!(shepherd.dog()["status"], "stopped");
+}
+
+/// A script, executable, in `dir`.
+fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
+    let path = dir.join(name);
+    fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("a script");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod");
+    path
+}
+
+/// Wait for `file` to hold text, and return it.
+fn read_when_written(file: &Path) -> String {
+    wait_until(&format!("{} to be written", file.display()), || {
+        fs::read_to_string(file).is_ok_and(|text| !text.is_empty())
+    });
+    fs::read_to_string(file).expect("the file was written")
+}
+
+#[test]
+fn a_sheep_with_the_sandbox_dog_runs_its_command_under_crabpot() {
+    let shepherd = Shepherd::new();
+    shepherd.boot();
+    shepherd.adopt_launch_dog();
+    let cwd = tempfile::tempdir().expect("the sheep's cwd");
+    let script = script(cwd.path(), "run.sh", "echo ran > ran.txt");
+
+    let started = shepherd.start_boxed(cwd.path(), &script, "");
+
+    assert!(started.status.success(), "{started:?}");
+    assert_eq!(read_when_written(&cwd.path().join("ran.txt")), "ran\n");
+}
+
+#[test]
+fn a_sheep_cannot_write_outside_its_cwd_through_the_dog() {
+    let shepherd = Shepherd::new();
+    shepherd.boot();
+    shepherd.adopt_launch_dog();
+    let cwd = tempfile::tempdir().expect("the sheep's cwd");
+    let outside = tempfile::tempdir().expect("a directory beside it");
+    let escaped = outside.path().join("escaped.txt");
+    let script = script(
+        cwd.path(),
+        "run.sh",
+        &format!(
+            "echo inside > inside.txt\nif echo outside > {path} 2>/dev/null; then echo wrote; else echo denied; fi > verdict.txt",
+            path = escaped.display()
+        ),
+    );
+
+    let started = shepherd.start_boxed(cwd.path(), &script, "");
+
+    assert!(started.status.success(), "{started:?}");
+    assert_eq!(
+        read_when_written(&cwd.path().join("verdict.txt")),
+        "denied\n"
+    );
+    assert!(cwd.path().join("inside.txt").exists());
+    assert!(!escaped.exists(), "the sheep wrote outside its cwd");
+}
+
+#[test]
+fn a_sheep_whose_table_crabpot_refuses_exits_125_and_never_runs_unsandboxed() {
+    let shepherd = Shepherd::new();
+    shepherd.boot();
+    shepherd.adopt_launch_dog();
+    let cwd = tempfile::tempdir().expect("the sheep's cwd");
+    let script = script(cwd.path(), "run.sh", "echo ran > ran.txt");
+
+    // Only a denied entry may be `*`. The shepherd may refuse the table when
+    // it starts the sheep, or the dog when it launches it, and either way
+    // the command must not run.
+    let started = shepherd.start_boxed(cwd.path(), &script, "network.allowedDomains = [\"*\"]");
+
+    if started.status.success() {
+        wait_until("the sheep to exit", || shepherd.boxed_exit().is_some());
+        assert_eq!(shepherd.boxed_exit(), Some(125));
+    } else {
+        // crabpot's message names the key, so an unrelated start failure
+        // does not pass for the refusal.
+        let said = format!(
+            "{}{}",
+            String::from_utf8_lossy(&started.stdout),
+            String::from_utf8_lossy(&started.stderr)
+        );
+        assert!(said.contains("network.allowedDomains"), "{said}");
+    }
+    assert!(!cwd.path().join("ran.txt").exists(), "the command ran");
+}
+
+#[test]
+fn the_sandboxed_command_cannot_connect_to_the_shepherds_control_socket() {
+    let shepherd = Shepherd::new();
+    shepherd.boot();
+    shepherd.adopt_launch_dog();
+    let cwd = tempfile::tempdir().expect("the sheep's cwd");
+    // The dog binary asks the shepherd over `$SHEP_HOME/run/shep.sock`, so
+    // what it reaches from inside is what any process of the sheep reaches.
+    let script = script(
+        cwd.path(),
+        "run.sh",
+        &format!(
+            "test -n \"$SHEP_HOME\" && echo set > home.txt\n{dog} launch boxed -- true 2> reach.txt\necho $? > code.txt",
+            dog = DOG_BIN
+        ),
+    );
+
+    let started = shepherd.start_boxed(cwd.path(), &script, "");
+
+    assert!(started.status.success(), "{started:?}");
+    assert_eq!(read_when_written(&cwd.path().join("code.txt")), "125\n");
+    assert_eq!(
+        fs::read_to_string(cwd.path().join("home.txt")).unwrap_or_default(),
+        "set\n"
+    );
+    let reach = fs::read_to_string(cwd.path().join("reach.txt")).expect("the dog's refusal");
+    assert!(reach.contains("cannot reach the shepherd"), "{reach}");
+
+    // The same call from outside the sandbox does reach it.
+    let outside = Command::new(DOG_BIN)
+        .args(["launch", "boxed", "--", "true"])
+        .env("SHEP_HOME", shepherd.home.path())
+        .env_remove("SHEP_DOG_NAME")
+        .current_dir(cwd.path())
+        .output()
+        .expect("the dog ran");
+    assert_eq!(outside.status.code(), Some(0), "{outside:?}");
 }
