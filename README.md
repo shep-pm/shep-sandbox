@@ -26,7 +26,7 @@ shep-sandbox launch <sheep> -- <command> [args...]
 
 The shepherd spawns a sandboxed sheep this way. `launch` reads `$SHEP_HOME`, which the shepherd passes, asks the shepherd for the sheep's `[app.dogs.sandbox]` table, adds the current directory (the sheep's cwd) to `filesystem.allowWrite`, and runs the command under crabpot with that table. The command's exit status is `launch`'s.
 
-- Every refusal exits 125, as crabpot does, with one line on stderr naming the cause: no `$SHEP_HOME`, a shepherd that cannot be reached, no table for the sheep, a table crabpot refuses, no command after `--`, or crabpot's own refusal.
+- Every refusal exits 125, as crabpot does, with one line on stderr naming the cause: no sheep name before `--`, no `$SHEP_HOME`, a shepherd that cannot be reached, no table for the sheep, a table crabpot refuses, no command after `--`, or crabpot's own refusal.
 - A command that crabpot never reached never runs. `launch` has no fallback that runs it outside the sandbox.
 - On Windows `launch` exits 125 saying the platform is not supported.
 - On Linux the sandbox runs this binary again inside itself, so the dog's binary must be readable inside the sandbox.

@@ -35,16 +35,20 @@ fn the_sheep_name_and_the_command_are_split_at_the_double_dash() {
 
 #[test]
 fn a_missing_command_is_refused() {
-    for args in [&["api", "--"][..], &["api"], &["--", "node"], &[]] {
+    for args in [&["api", "--"][..], &["api"], &["api", "node"]] {
         let refusal = parse_args(&os(args)).expect_err(&format!("{args:?} names no command"));
 
-        assert!(
-            matches!(refusal, Refusal::NoCommand | Refusal::NoSheep),
-            "{args:?}: {refusal}"
-        );
+        assert!(matches!(refusal, Refusal::NoCommand), "{args:?}: {refusal}");
     }
-    let refusal = parse_args(&os(&["api", "--"])).expect_err("nothing after the dash");
-    assert!(matches!(refusal, Refusal::NoCommand), "{refusal}");
+}
+
+#[test]
+fn a_missing_sheep_name_is_refused() {
+    for args in [&["--", "node"][..], &[]] {
+        let refusal = parse_args(&os(args)).expect_err(&format!("{args:?} names no sheep"));
+
+        assert!(matches!(refusal, Refusal::NoSheep), "{args:?}: {refusal}");
+    }
 }
 
 #[test]

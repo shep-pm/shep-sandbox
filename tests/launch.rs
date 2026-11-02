@@ -34,6 +34,7 @@ fn stderr(output: &Output) -> String {
 }
 
 #[test]
+#[cfg(unix)]
 fn the_command_exits_125_when_no_shepherd_can_be_reached() {
     let (output, ran) = launch(Some("/nonexistent/shep-home"), &["--", "touch"]);
 
@@ -44,6 +45,7 @@ fn the_command_exits_125_when_no_shepherd_can_be_reached() {
 }
 
 #[test]
+#[cfg(unix)]
 fn the_command_exits_125_when_shep_home_is_unset() {
     let (output, ran) = launch(None, &["--", "touch"]);
 
@@ -53,9 +55,24 @@ fn the_command_exits_125_when_shep_home_is_unset() {
 }
 
 #[test]
+#[cfg(unix)]
 fn a_launch_with_no_command_exits_125() {
     let (output, _) = launch(Some("/nonexistent/shep-home"), &["--"]);
 
     assert_eq!(output.status.code(), Some(125), "{}", stderr(&output));
     assert!(stderr(&output).contains("command"), "{}", stderr(&output));
+}
+
+#[test]
+#[cfg(not(unix))]
+fn launch_says_the_platform_is_not_supported() {
+    let (output, ran) = launch(Some("/nonexistent/shep-home"), &["--", "touch"]);
+
+    assert_eq!(output.status.code(), Some(125), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("not supported"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!ran);
 }

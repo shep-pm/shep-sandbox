@@ -6,8 +6,9 @@
 //! command under crabpot with the sheep's table instead.
 //!
 //! `shep adopt` asks `--version`, `--schema` and `--shep-manifest` of a
-//! candidate it has not registered. [`Probe::answer`] replies on the first
-//! line of [`main`], before this process opens a socket or reads `$SHEP_HOME`.
+//! candidate it has not registered. The probe chain in [`main`] replies after
+//! `crabpot::run_from_args()` and before this process opens a socket or reads
+//! `$SHEP_HOME`.
 
 mod config;
 mod error;

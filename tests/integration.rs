@@ -126,6 +126,12 @@ impl Shepherd {
             "--style",
             "bare",
         ]);
+        // Adoption starts the dog asynchronously, and a sheep started before
+        // it handshakes can race the validation request.
+        wait_until("the launch dog's handshake", || {
+            let dog = self.dog_named(LAUNCH_NAME);
+            dog["status"] == "online" && dog["handshook"] == true
+        });
     }
 
     /// Start the one sheep a Flockfile holds, which runs `script` from `cwd`
@@ -162,13 +168,18 @@ impl Shepherd {
 
     /// The [`DOG_NAME`] entry of `shep dogs`.
     fn dog(&self) -> serde_json::Value {
+        self.dog_named(DOG_NAME)
+    }
+
+    /// The `name` entry of `shep dogs`.
+    fn dog_named(&self, name: &str) -> serde_json::Value {
         let listing: serde_json::Value =
             serde_json::from_str(&self.ok(&["dogs", "--format", "json"])).expect("JSON listing");
         listing["data"]
             .as_array()
             .expect("a data array")
             .iter()
-            .find(|dog| dog["name"] == DOG_NAME)
+            .find(|dog| dog["name"] == name)
             .cloned()
             .expect("the adopted dog is listed")
     }
@@ -287,6 +298,15 @@ fn a_sheep_whose_table_crabpot_refuses_exits_125_and_never_runs_unsandboxed() {
     if started.status.success() {
         wait_until("the sheep to exit", || shepherd.boxed_exit().is_some());
         assert_eq!(shepherd.boxed_exit(), Some(125));
+    } else {
+        // crabpot's message names the key, so an unrelated start failure
+        // does not pass for the refusal.
+        let said = format!(
+            "{}{}",
+            String::from_utf8_lossy(&started.stdout),
+            String::from_utf8_lossy(&started.stderr)
+        );
+        assert!(said.contains("network.allowedDomains"), "{said}");
     }
     assert!(!cwd.path().join("ran.txt").exists(), "the command ran");
 }
