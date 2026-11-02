@@ -16,8 +16,8 @@ So far it is an adoptable dog and nothing else. It declares no verb. Adopted (`$
 
 ## Where things live
 
-- `src/main.rs`: the probes, the two placeholder verbs, and the idle loop. `src/config.rs` is the `[sandbox]` section, `src/error.rs` what stops the dog.
-- `tests/probe.rs` runs the binary with shep's flags and verbs. `tests/integration.rs` needs a built shep.
+- `src/main.rs`: the probes and the idle loop. `src/config.rs` is the `[sandbox]` section, `src/error.rs` what stops the dog.
+- `tests/probe.rs` runs the binary with shep's probe flags. `tests/integration.rs` needs a built shep.
 - `docs/design-notes.md`: the discussion that started the effort. Decisions after it live on the map's tickets, not here.
 
 ## Style
