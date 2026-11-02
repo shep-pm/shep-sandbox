@@ -37,9 +37,7 @@ serde = { version = "1", default-features = false, features = ["derive"] }
 # Builds the settings document handed to crabpot.
 serde_json = { version = "1", default-features = false, features = ["std"] }
 tokio = { version = "1", default-features = false, features = ["rt", "macros"] }
-
-[dev-dependencies]
-# Only to give each integration test its own $SHEP_HOME.
+# An unlinked file for the settings crabpot reads through `/dev/fd`.
 tempfile = { version = "3", default-features = false }
 
 [[test]]

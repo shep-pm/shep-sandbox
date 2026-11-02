@@ -54,6 +54,25 @@ impl JsonSchema for SheepSettings {
     }
 }
 
+/// `table` with the five lists crabpot requires added, empty, where it omits
+/// them.
+///
+/// A group that is not an object is left as it is, for crabpot to refuse.
+pub fn filled(table: &Map<String, Value>) -> Map<String, Value> {
+    let mut settings = table.clone();
+    for (group, list) in REQUIRED_LISTS {
+        let group = settings
+            .entry(group)
+            .or_insert_with(|| Value::Object(Map::new()));
+        if let Value::Object(group) = group {
+            group
+                .entry(list)
+                .or_insert_with(|| Value::Array(Vec::new()));
+        }
+    }
+    settings
+}
+
 /// The settings `table` holds, as crabpot reads them.
 ///
 /// The five lists crabpot requires are empty when the table omits them. A key
@@ -63,19 +82,7 @@ impl JsonSchema for SheepSettings {
 ///
 /// [`Error::Settings`] when crabpot refuses the table, naming the key.
 pub fn parse(table: &Map<String, Value>) -> Result<Config, Error> {
-    let mut settings = table.clone();
-    for (group, list) in REQUIRED_LISTS {
-        let group = settings
-            .entry(group)
-            .or_insert_with(|| Value::Object(Map::new()));
-        // A group that is not an object is crabpot's to refuse.
-        if let Value::Object(group) = group {
-            group
-                .entry(list)
-                .or_insert_with(|| Value::Array(Vec::new()));
-        }
-    }
-    Config::from_json(&Value::Object(settings).to_string()).map_err(Error::Settings)
+    Config::from_json(&Value::Object(filled(table)).to_string()).map_err(Error::Settings)
 }
 
 /// What the dog answers a `shep.validate` action with for `proposed`.
