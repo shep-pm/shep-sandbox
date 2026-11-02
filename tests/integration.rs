@@ -23,6 +23,10 @@ use std::{
 
 const DOG_BIN: &str = env!("CARGO_BIN_EXE_shep-sandbox");
 
+/// The name the test adopts the dog under. shep refuses a dog named `sandbox`
+/// whose manifest does not declare `launch`, which this dog does not yet.
+const DOG_NAME: &str = "sandbox-it";
+
 /// A ceiling on every poll, so a dog that never connects fails the test with
 /// a sentence rather than hanging the job until CI's timeout.
 const PATIENCE: Duration = Duration::from_secs(60);
@@ -102,11 +106,11 @@ impl Shepherd {
 
     fn adopt_dog(&self) {
         self.ok(&[
-            "adopt", DOG_BIN, "--name", "sandbox", "--yes", "--style", "bare",
+            "adopt", DOG_BIN, "--name", DOG_NAME, "--yes", "--style", "bare",
         ]);
     }
 
-    /// The `sandbox` entry of `shep dogs`.
+    /// The [`DOG_NAME`] entry of `shep dogs`.
     fn dog(&self) -> serde_json::Value {
         let listing: serde_json::Value =
             serde_json::from_str(&self.ok(&["dogs", "--format", "json"])).expect("JSON listing");
@@ -114,9 +118,9 @@ impl Shepherd {
             .as_array()
             .expect("a data array")
             .iter()
-            .find(|dog| dog["name"] == "sandbox")
+            .find(|dog| dog["name"] == DOG_NAME)
             .cloned()
-            .expect("the sandbox dog is listed")
+            .expect("the adopted dog is listed")
     }
 }
 
@@ -152,7 +156,7 @@ fn an_adopted_dog_connects_and_exits_0_when_stopped() {
         dog["status"] == "online" && dog["handshook"] == true
     });
 
-    shepherd.ok(&["stop", "sandbox", "--style", "bare"]);
+    shepherd.ok(&["stop", DOG_NAME, "--style", "bare"]);
     wait_until("the dog to exit", || {
         shepherd.dog()["last_exit"]["code"] == 0
     });

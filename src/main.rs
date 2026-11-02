@@ -66,15 +66,23 @@ async fn run(args: &[String]) -> Result<(), Error> {
         return Err(Error::Bare);
     }
 
-    shep_channel::serve().on_action(VALIDATE_ACTION, |params, _name| {
-        validate_answer(params, settings::verdict)
-    });
+    // With the channel asked for, the shepherd stops the dog by message, and
+    // signals only once `kill_timeout` runs out.
+    let (mut shutdown, request_shutdown) = Stop::new();
+    shep_channel::serve()
+        .on_action(VALIDATE_ACTION, |params, _name| {
+            validate_answer(params, settings::verdict)
+        })
+        .on_shutdown(move || request_shutdown.request());
 
     let mut stop = Stop::on_stop_signals();
     let paths = dogs::resolve_paths(&|key| std::env::var_os(key))?;
     let runtime = DogRuntime::start(identity, paths).await?;
     let _: Section = runtime.config()?;
 
-    stop.wait().await;
+    tokio::select! {
+        () = stop.wait() => {}
+        () = shutdown.wait() => {}
+    }
     Ok(())
 }
