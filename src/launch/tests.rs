@@ -94,6 +94,7 @@ fn every_refusal_maps_to_exit_125() {
         .expect_err("crabpot refuses a wildcard allow"),
         Refusal::Cwd(io::Error::other("gone")),
         Refusal::SettingsFile(io::Error::other("disk full")),
+        Refusal::ControlPipe(io::Error::other("too many open files")),
         Refusal::Runtime(io::Error::other("no threads")),
         Refusal::Unsupported,
     ];
