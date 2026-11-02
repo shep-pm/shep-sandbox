@@ -71,7 +71,7 @@ jobs:
       # one package with a binary, and `--bin` does not pick between them.
       - name: Build a real shep
         run: cargo install --git https://github.com/shep-pm/shep --branch main shep --bin shep --locked
-      # The v2 launch runs a sheep under a real crabpot, which needs
+      # The v2 launch will run a sheep under a real crabpot, which will need
       # bubblewrap and, on Ubuntu 24.04+, unprivileged user namespaces.
       - name: Install bubblewrap
         run: sudo apt-get update && sudo apt-get install -y bubblewrap
