@@ -2,9 +2,9 @@
 
 Run a shep sheep inside a crabpot sandbox. MIT OR Apache-2.0.
 
-The plan is a split. shep spawns a sandboxed sheep through a per-sheep `crabpot -s <settings> -- <cmd>` launcher, because crabpot has no daemon and a sandbox lives in the process that started it. This dog handles the rest: install and doctor, the presets, and surfacing violations. The design is still being charted on this repository's issues (the `wayfinder:map` issue).
+The plan is a split. shep spawns a sandboxed sheep through a per-sheep `crabpot -s <settings> -- <cmd>` launcher, because crabpot has no daemon and a sandbox lives in the process that started it. This dog handles the rest: the presets and surfacing violations. The v2 dog launches a sheep from its own settings table, so the v1 `init` and `doctor` verbs and their `sandbox.json` file are removed. They return once ported to the settings table. The design is still being charted on this repository's issues (the `wayfinder:map` issue).
 
-So far it is an adoptable dog and nothing else. Adopted (`$SHEP_DOG_NAME` set, no verb), it reads its `[sandbox]` section and idles until the shepherd stops it. `shep sandbox init` and `shep sandbox doctor` reach it as a first argument and exit 2 with "not built yet".
+So far it is an adoptable dog and nothing else. It declares no verb. Adopted (`$SHEP_DOG_NAME` set), it reads its `[sandbox]` section and idles until the shepherd stops it. Named but not supervised (`shep sandbox`, which hands it no connection), it exits 2 saying it runs only as a supervised dog.
 
 ## Commands
 
@@ -16,8 +16,8 @@ So far it is an adoptable dog and nothing else. Adopted (`$SHEP_DOG_NAME` set, n
 
 ## Where things live
 
-- `src/main.rs`: the probes, the two placeholder verbs, and the idle loop. `src/config.rs` is the `[sandbox]` section, `src/error.rs` what stops the dog.
-- `tests/probe.rs` runs the binary with shep's flags and verbs. `tests/integration.rs` needs a built shep.
+- `src/main.rs`: the probes and the idle loop. `src/config.rs` is the `[sandbox]` section, `src/error.rs` what stops the dog.
+- `tests/probe.rs` runs the binary with shep's probe flags. `tests/integration.rs` needs a built shep.
 - `docs/design-notes.md`: the discussion that started the effort. Decisions after it live on the map's tickets, not here.
 
 ## Style
