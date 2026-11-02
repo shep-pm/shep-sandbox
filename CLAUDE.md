@@ -16,7 +16,7 @@ So far it is an adoptable dog and nothing else. It declares no verb. Adopted (`$
 
 ## Where things live
 
-- `src/main.rs`: the probes and the idle loop. `src/config.rs` is the `[sandbox]` section, `src/error.rs` what stops the dog.
+- `src/main.rs`: the probes and the idle loop. `src/config.rs` is the `[sandbox]` section, `src/settings.rs` a sheep's table, which crabpot's `Config` parses and whose schema the dog serves, `src/error.rs` what stops the dog.
 - `tests/probe.rs` runs the binary with shep's probe flags. `tests/integration.rs` needs a built shep.
 - `docs/design-notes.md`: the discussion that started the effort. Decisions after it live on the map's tickets, not here.
 

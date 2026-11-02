@@ -5,7 +5,7 @@
 use std::process::{Command, Output};
 
 use shep_client::shep_core::{
-    dogs::{MANIFEST_FLAG, SCHEMA_FLAG, VERSION_FLAG, parse_version_answer},
+    dogs::{MANIFEST_FLAG, SCHEMA_FLAG, SHEEP_SCHEMA_KEY, VERSION_FLAG, parse_version_answer},
     protocol::PROTOCOL_VERSION,
 };
 
@@ -119,5 +119,48 @@ fn a_refused_argument_names_the_dog_it_was_adopted_as() {
         String::from_utf8_lossy(&output.stderr).contains("crab does not understand --bogus"),
         "{}",
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn the_manifest_asks_for_a_channel_and_for_validation() {
+    let output = run(&[MANIFEST_FLAG]);
+
+    assert!(output.status.success());
+    let manifest: serde_json::Value = serde_json::from_str(&stdout(&output)).expect("JSON");
+    assert_eq!(manifest["channel"], true, "{manifest}");
+    assert_eq!(manifest["validate"], true, "{manifest}");
+}
+
+/// The node a `$ref` points at, or the node itself when it holds none.
+fn resolved<'a>(root: &'a serde_json::Value, node: &'a serde_json::Value) -> &'a serde_json::Value {
+    match node.get("$ref").and_then(serde_json::Value::as_str) {
+        Some(reference) => root
+            .pointer(reference.strip_prefix('#').expect("a local reference"))
+            .expect("the reference resolves"),
+        None => node,
+    }
+}
+
+#[test]
+fn the_schema_answer_describes_the_sheep_table_with_crabpots_keys() {
+    let output = run(&[SCHEMA_FLAG]);
+
+    assert!(output.status.success());
+    let schema: serde_json::Value = serde_json::from_str(&stdout(&output)).expect("JSON");
+    let sheep = resolved(&schema, &schema[SHEEP_SCHEMA_KEY]);
+    let network = resolved(&schema, &sheep["properties"]["network"]);
+    let filesystem = resolved(&schema, &sheep["properties"]["filesystem"]);
+    assert!(
+        network["properties"]["allowedDomains"].is_object(),
+        "{network}"
+    );
+    assert!(
+        filesystem["properties"]["denyRead"].is_object(),
+        "{filesystem}"
+    );
+    assert!(
+        sheep["properties"]["enableWeakerNetworkIsolation"].is_object(),
+        "{sheep}"
     );
 }
