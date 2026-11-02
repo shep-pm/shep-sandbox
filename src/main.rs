@@ -1,7 +1,8 @@
 //! Run a shep sheep inside a crabpot sandbox.
 //!
-//! Adopted, the dog has no work of its own yet: it reads its `[sandbox]`
-//! section and idles until the shepherd stops it. It declares no verb.
+//! Adopted, the dog reads its `[sandbox]` section, checks each sheep's
+//! `[app.dogs.sandbox]` table against crabpot before `shep` writes it, and
+//! idles until the shepherd stops it. It declares no verb.
 //!
 //! `shep adopt` asks `--version`, `--schema` and `--shep-manifest` of a
 //! candidate it has not registered. [`Probe::answer`] replies on the first
@@ -9,14 +10,16 @@
 
 mod config;
 mod error;
+mod settings;
 
 use std::{ffi::OsString, process::ExitCode};
 
-use shep_client::dogs::{self, DogAction, DogIdentity, DogRuntime, Probe, Stop};
+use shep_client::{
+    dogs::{self, DogAction, DogIdentity, DogRuntime, Probe, Stop, validate_answer},
+    shep_core::dogs::{DOG_LINK_FD_VAR, DOG_LINK_PIPE_VAR, validate::VALIDATE_ACTION},
+};
 
-use shep_client::shep_core::dogs::{DOG_LINK_FD_VAR, DOG_LINK_PIPE_VAR};
-
-use crate::{config::Section, error::Error};
+use crate::{config::Section, error::Error, settings::SheepSettings};
 
 /// The `[<name>]` section to read when `$SHEP_DOG_NAME` is unset, which
 /// means nothing adopted this process. It matches the name `shep adopt`
@@ -25,7 +28,10 @@ const DEFAULT_NAME: &str = "sandbox";
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
-    Probe::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")).answer::<Section>();
+    Probe::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
+        .ask_for_channel()
+        .validate()
+        .answer_with_sheep::<Section, SheepSettings>();
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     match run(&args).await {
@@ -59,6 +65,10 @@ async fn run(args: &[String]) -> Result<(), Error> {
     if named && !is_supervised(&|key| std::env::var_os(key)) {
         return Err(Error::Bare);
     }
+
+    shep_channel::serve().on_action(VALIDATE_ACTION, |params, _name| {
+        validate_answer(params, settings::verdict)
+    });
 
     let mut stop = Stop::on_stop_signals();
     let paths = dogs::resolve_paths(&|key| std::env::var_os(key))?;
