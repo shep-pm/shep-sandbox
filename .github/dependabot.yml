@@ -1,14 +1,15 @@
-# Subjects carry `ci(deps):` and `chore(deps):` so commits.yml accepts them.
-# release-plz skips both types, so a bump alone makes no changelog entry and
-# the release workflow's empty-changelog guard holds that release open.
+# Subjects carry `ci(deps):` and `fix(deps):` so commits.yml accepts them.
+# release-plz skips `ci` and `chore` but maps `fix` to Fixed, so a `fix(deps):`
+# bump opens a release.
 #
 # crabpot is the one dependency that releases the dog: once the dog links the
 # crabpot crate, a crabpot release changes what the dog does. Until #31 adds
-# that dependency, the daily entry finds nothing to bump. Its own entry carries
-# `fix(deps):`, which release-plz maps to Fixed, so a bump opens a release.
-# dependabot-auto-merge.yml enables auto-merge on that entry's pull requests
-# alone. The monthly entry ignores crabpot so the two never open the same
-# pull request.
+# that dependency there is nothing to bump. Dependabot refuses two `cargo`
+# entries for the same directory, so one daily entry covers every crate:
+# crabpot is excluded from the group and gets its own pull request on
+# `dependabot/cargo/crabpot-*`, the branch dependabot-auto-merge.yml matches.
+# Every other crate stays in one grouped pull request, which auto-merge never
+# sees.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -26,25 +27,11 @@ updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
-      interval: monthly
+      interval: daily
     groups:
       cargo:
         patterns: ["*"]
-    ignore:
-      - dependency-name: crabpot
-    commit-message:
-      prefix: chore
-      include: scope
-    labels: [dependencies]
-
-  # No group: an ungrouped pull request is on `dependabot/cargo/crabpot-*`,
-  # the branch the auto-merge workflow matches.
-  - package-ecosystem: cargo
-    directory: /
-    schedule:
-      interval: daily
-    allow:
-      - dependency-name: crabpot
+        exclude-patterns: [crabpot]
     commit-message:
       prefix: fix
       include: scope
