@@ -2,8 +2,9 @@
 # release-plz skips both types, so a bump alone makes no changelog entry and
 # the release workflow's empty-changelog guard holds that release open.
 #
-# crabpot is the one dependency that releases the dog: the dog links it, so
-# a crabpot release changes what the dog does. Its own daily entry carries
+# crabpot is the one dependency that releases the dog: once the dog links the
+# crabpot crate, a crabpot release changes what the dog does. Until #31 adds
+# that dependency, the daily entry finds nothing to bump. Its own entry carries
 # `fix(deps):`, which release-plz maps to Fixed, so a bump opens a release.
 # dependabot-auto-merge.yml enables auto-merge on that entry's pull requests
 # alone. The monthly entry ignores crabpot so the two never open the same
