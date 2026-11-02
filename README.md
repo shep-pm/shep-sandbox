@@ -70,7 +70,7 @@ shep set reactmap.dogs.sandbox.network.allowedDomains '["raw.githubusercontent.c
 
 ## Refusals
 
-Every refusal exits 125 with one line on stderr naming the cause, and shep marks the sheep errored without restarting it. A command crabpot never reached never runs: there is no fallback outside the sandbox.
+A refusal at launch exits 125 with one line on stderr naming the cause, and shep marks the sheep errored without restarting it. A refusal while the sheep runs is only logged, as above. A command crabpot never reached never runs: there is no fallback outside the sandbox.
 
 Do not let a sheep reach the shepherd's control socket. That socket trusts any process of the same user, so a sheep that connects to it holds the operator's authority over the whole flock. `network.allowAllUnixSockets`, or a `network.allowUnixSockets` entry that reaches `$SHEP_HOME/run/shep.sock`, grants exactly that.
 
