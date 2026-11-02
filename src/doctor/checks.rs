@@ -3,7 +3,7 @@
 
 use std::{io, path::Path};
 
-use super::{Check, Command, Env, Os, SandboxedSheep, Status};
+use super::{Check, Command, Env, FlockEntry, Os, SandboxedSheep, Status};
 
 /// crabpot's exit code when it refuses to start, as opposed to the
 /// command it runs failing.
@@ -288,12 +288,23 @@ fn sheep_check(env: &dyn Env, sheep: &SandboxedSheep) -> Check {
 
 /// Each sheep with `sandbox` set has settings crabpot loads.
 pub fn flock(env: &dyn Env) -> Vec<Check> {
-    let sheep = env.sandboxed_sheep();
+    let sheep = match env.sandboxed_sheep() {
+        Ok(sheep) => sheep,
+        Err(err) => return vec![check("flock", Status::Skip(err.to_string()))],
+    };
     if sheep.is_empty() {
         return vec![check(
             "flock",
             Status::Skip("no sheep in the flock has `sandbox` set".to_owned()),
         )];
     }
-    sheep.iter().map(|sheep| sheep_check(env, sheep)).collect()
+    sheep
+        .iter()
+        .map(|entry| match entry {
+            FlockEntry::Sandboxed(sheep) => sheep_check(env, sheep),
+            FlockEntry::Unchecked { name, reason } => {
+                check(&format!("sheep {name}"), Status::Skip(reason.clone()))
+            }
+        })
+        .collect()
 }
