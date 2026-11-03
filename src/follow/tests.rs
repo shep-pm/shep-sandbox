@@ -437,8 +437,10 @@ async fn a_link_whose_table_cannot_be_read_is_not_dialled_again() {
 
 #[tokio::test(start_paused = true)]
 async fn a_link_that_cannot_be_subscribed_says_a_restart_is_needed_and_is_not_retried() {
-    let mut shepherd = FakeShepherd::default();
-    shepherd.link_only = true;
+    let mut shepherd = FakeShepherd {
+        link_only: true,
+        ..FakeShepherd::default()
+    };
     shepherd.then_unreachable();
 
     let said = followed_to_the_end(&mut shepherd, settings(json!({}))).await;
