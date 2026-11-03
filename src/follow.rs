@@ -74,6 +74,7 @@ pub async fn follow(
     shepherd: &mut impl Shepherd,
     sheep: &str,
     cwd: &Path,
+    shep_home: &Path,
     last: Map<String, Value>,
     control: &mut impl Write,
     log: &mut impl Write,
@@ -81,6 +82,7 @@ pub async fn follow(
     let mut follower = Follower {
         sheep,
         cwd,
+        shep_home,
         last,
         control,
         log,
@@ -137,6 +139,7 @@ enum Ended {
 struct Follower<'a, C, L> {
     sheep: &'a str,
     cwd: &'a Path,
+    shep_home: &'a Path,
     last: Map<String, Value>,
     control: &'a mut C,
     log: &'a mut L,
@@ -181,7 +184,7 @@ impl<C: Write, L: Write> Follower<'_, C, L> {
                 return Flow::Lost;
             }
         };
-        match effective_settings(table, self.cwd) {
+        match effective_settings(table, self.cwd, self.shep_home) {
             Ok(settings) => self.apply(settings),
             Err(refusal) => {
                 self.say(&format!("{refusal}, the settings in force stay"));
@@ -322,14 +325,15 @@ impl Session for Live {
 }
 
 /// Follows `sheep`'s table on a thread of its own, on the shepherd at
-/// `socket`, and writes the network lists to `control`. The thread ends with
-/// the process, or once `control` is closed.
+/// `socket` whose home is `shep_home`, and writes the network lists to
+/// `control`. The thread ends with the process, or once `control` is closed.
 ///
 /// # Errors
 ///
 /// Whatever starting the thread fails with.
 pub fn spawn(
     socket: PathBuf,
+    shep_home: PathBuf,
     sheep: String,
     cwd: PathBuf,
     last: Map<String, Value>,
@@ -352,6 +356,7 @@ pub fn spawn(
                 &mut Socket(socket),
                 &sheep,
                 &cwd,
+                &shep_home,
                 last,
                 &mut control,
                 &mut io::stderr(),

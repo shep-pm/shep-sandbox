@@ -8,6 +8,7 @@ use super::{Heard, Session, Shepherd, follow};
 use crate::launch::effective_settings;
 
 const CWD: &str = "/work/web";
+const SHEP_HOME: &str = "/home/me/.shep";
 
 fn table(value: Value) -> Map<String, Value> {
     let Value::Object(table) = value else {
@@ -18,7 +19,8 @@ fn table(value: Value) -> Map<String, Value> {
 
 /// The settings `launch` would hand crabpot for `value`.
 fn settings(value: Value) -> Map<String, Value> {
-    effective_settings(table(value), Path::new(CWD)).expect("crabpot reads the table")
+    effective_settings(table(value), Path::new(CWD), Path::new(SHEP_HOME))
+        .expect("crabpot reads the table")
 }
 
 /// A connection that says what it is scripted to say, then stays quiet, or
@@ -129,6 +131,7 @@ async fn followed(shepherd: &mut FakeShepherd, last: Map<String, Value>) -> Said
             shepherd,
             "web",
             Path::new(CWD),
+            Path::new(SHEP_HOME),
             last,
             &mut control,
             &mut log,
@@ -160,7 +163,12 @@ async fn a_change_to_allowed_domains_is_sent_as_one_json_line() {
         line,
         json!({
             "network": {"allowedDomains": ["example.com"], "deniedDomains": []},
-            "filesystem": {"denyRead": [], "allowWrite": [CWD], "denyWrite": []},
+            "filesystem": {
+                "denyRead": ["~", SHEP_HOME],
+                "allowRead": [CWD],
+                "allowWrite": [CWD],
+                "denyWrite": [],
+            },
         })
     );
     assert_eq!(said.log, "");

@@ -150,15 +150,22 @@ pub fn parse_args(args: &[OsString]) -> Result<Invocation, Refusal> {
 }
 
 /// `table` as crabpot will read it: the five required lists present, `cwd`
-/// in `filesystem.allowWrite` once, and the whole checked against crabpot.
+/// in `filesystem.allowWrite` and `filesystem.allowRead`, `~` and `shep_home`
+/// in `filesystem.denyRead`, each once, and the whole checked against crabpot.
+///
+/// A sheep reads nothing under home but its cwd until its own `allowRead`
+/// re-opens a path. `shep_home` stays hidden even then, because crabpot keeps
+/// a `denyRead` entry that is more specific than the `allowRead` around it.
 ///
 /// # Errors
 ///
-/// [`Refusal::Cwd`] when `cwd` is not UTF-8, and [`Refusal::Settings`] when
-/// crabpot refuses the result.
+/// [`Refusal::Cwd`] when `cwd` is not UTF-8, [`Refusal::Home`] when
+/// `shep_home` is not, and [`Refusal::Settings`] when crabpot refuses the
+/// result.
 pub fn effective_settings(
     table: Map<String, Value>,
     cwd: &Path,
+    shep_home: &Path,
 ) -> Result<Map<String, Value>, Refusal> {
     let cwd = cwd.to_str().ok_or_else(|| {
         Refusal::Cwd(io::Error::new(
@@ -166,15 +173,32 @@ pub fn effective_settings(
             "the path is not UTF-8",
         ))
     })?;
+    let shep_home = shep_home
+        .to_str()
+        .ok_or(Refusal::Home(HomeError::NotUtf8))?;
     let mut settings = settings::filled(&table);
-    if let Some(Value::Object(filesystem)) = settings.get_mut("filesystem")
-        && let Some(Value::Array(allow_write)) = filesystem.get_mut("allowWrite")
-        && !allow_write.iter().any(|entry| entry == cwd)
-    {
-        allow_write.push(Value::String(cwd.to_owned()));
+    if let Some(Value::Object(filesystem)) = settings.get_mut("filesystem") {
+        add_once(filesystem, "allowWrite", cwd);
+        add_once(filesystem, "allowRead", cwd);
+        add_once(filesystem, "denyRead", "~");
+        add_once(filesystem, "denyRead", shep_home);
     }
     settings::parse(&settings).map_err(Refusal::Settings)?;
     Ok(settings)
+}
+
+/// Appends `entry` to the list `key` of `filesystem` unless it is there. A
+/// missing list is made, and a `key` that is not a list is left for crabpot to
+/// refuse.
+fn add_once(filesystem: &mut Map<String, Value>, key: &str, entry: &str) {
+    let list = filesystem
+        .entry(key)
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if let Value::Array(list) = list
+        && !list.iter().any(|existing| existing == entry)
+    {
+        list.push(Value::String(entry.to_owned()));
+    }
 }
 
 /// Everything `launch` does short of running the command.
@@ -185,6 +209,7 @@ pub fn effective_settings(
 pub fn launch(
     args: &[OsString],
     cwd: &Path,
+    shep_home: &Path,
     fetch: impl FnOnce(&str) -> Result<Option<Map<String, Value>>, Refusal>,
     execute: impl FnOnce(Plan) -> Refusal,
 ) -> Refusal {
@@ -193,7 +218,7 @@ pub fn launch(
         let table = fetch(&sheep)?.ok_or_else(|| Refusal::NoTable {
             sheep: sheep.clone(),
         })?;
-        let settings = effective_settings(table, cwd)?;
+        let settings = effective_settings(table, cwd, shep_home)?;
         Ok(Plan {
             sheep,
             cwd: cwd.to_owned(),
@@ -213,30 +238,45 @@ pub fn run(args: &[OsString]) -> ExitCode {
     let refusal = if cfg!(not(unix)) {
         Refusal::Unsupported
     } else {
-        match std::env::current_dir() {
-            Ok(cwd) => launch(args, &cwd, fetch_table, execute),
-            Err(err) => Refusal::Cwd(err),
+        match (std::env::current_dir(), shep_paths()) {
+            (Ok(cwd), Ok(paths)) => launch(
+                args,
+                &cwd,
+                &paths.home,
+                |sheep| fetch_table(&paths.socket, sheep),
+                execute,
+            ),
+            (Err(err), _) => Refusal::Cwd(err),
+            (_, Err(refusal)) => refusal,
         }
     };
     eprintln!("shep-sandbox: {refusal}");
     ExitCode::from(refusal.exit_code())
 }
 
-/// The sheep's `[app.dogs.sandbox]` table, asked of the shepherd `$SHEP_HOME`
-/// names. The runtime that asks is gone when this returns.
-fn fetch_table(sheep: &str) -> Result<Option<Map<String, Value>>, Refusal> {
+/// The paths `$SHEP_HOME` names.
+///
+/// # Errors
+///
+/// [`Refusal::NoHome`] when it is unset, and [`Refusal::Home`] when it names no
+/// usable directory.
+fn shep_paths() -> Result<shep_client::shep_core::paths::ShepPaths, Refusal> {
     if std::env::var_os("SHEP_HOME").is_none() {
         return Err(Refusal::NoHome);
     }
-    let paths =
-        shep_client::dogs::resolve_paths(&|key| std::env::var_os(key)).map_err(Refusal::Home)?;
+    shep_client::dogs::resolve_paths(&|key| std::env::var_os(key)).map_err(Refusal::Home)
+}
+
+/// The sheep's `[app.dogs.sandbox]` table, asked of the shepherd at `socket`.
+/// The runtime that asks is gone when this returns.
+fn fetch_table(socket: &Path, sheep: &str) -> Result<Option<Map<String, Value>>, Refusal> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(Refusal::Runtime)?;
     runtime
         .block_on(async {
-            let client = shep_client::Client::connect(&paths.socket)
+            let client = shep_client::Client::connect(socket)
                 .await
                 .map_err(ShepherdError::from)?;
             client
@@ -286,10 +326,16 @@ fn follow_table(
     settings: Map<String, Value>,
     control: std::io::PipeWriter,
 ) {
-    let socket = shep_client::dogs::resolve_paths(&|key| std::env::var_os(key)).map(|p| p.socket);
-    let started = match socket {
-        Ok(socket) => crate::follow::spawn(socket, sheep.clone(), cwd, settings, control)
-            .map_err(|err| err.to_string()),
+    let started = match shep_paths() {
+        Ok(paths) => crate::follow::spawn(
+            paths.socket,
+            paths.home,
+            sheep.clone(),
+            cwd,
+            settings,
+            control,
+        )
+        .map_err(|err| err.to_string()),
         Err(err) => Err(err.to_string()),
     };
     if let Err(err) = started {

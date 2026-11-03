@@ -12,6 +12,8 @@ fn os(words: &[&str]) -> Vec<OsString> {
     words.iter().map(OsString::from).collect()
 }
 
+const SHEP_HOME: &str = "/home/me/.shep";
+
 fn table(value: Value) -> Map<String, Value> {
     let Value::Object(table) = value else {
         panic!("a table is a JSON object: {value}");
@@ -55,11 +57,13 @@ fn a_missing_sheep_name_is_refused() {
 fn the_cwd_is_added_to_allow_write_once() {
     let cwd = Path::new("/work/api");
 
-    let once = effective_settings(table(json!({})), cwd).expect("an empty table parses");
+    let once = effective_settings(table(json!({})), cwd, Path::new(SHEP_HOME))
+        .expect("an empty table parses");
     assert_eq!(once["filesystem"]["allowWrite"], json!(["/work/api"]));
 
     let already = table(json!({"filesystem": {"allowWrite": ["/var/cache", "/work/api"]}}));
-    let twice = effective_settings(already, cwd).expect("a table that already lists it");
+    let twice = effective_settings(already, cwd, Path::new(SHEP_HOME))
+        .expect("a table that already lists it");
     assert_eq!(
         twice["filesystem"]["allowWrite"],
         json!(["/var/cache", "/work/api"])
@@ -67,12 +71,70 @@ fn the_cwd_is_added_to_allow_write_once() {
 }
 
 #[test]
+fn home_and_shep_home_are_denied_and_the_cwd_re_opened_once() {
+    let (cwd, shep_home) = (Path::new("/work/api"), Path::new(SHEP_HOME));
+
+    let once = effective_settings(table(json!({})), cwd, shep_home).expect("an empty table parses");
+    assert_eq!(
+        once["filesystem"]["denyRead"],
+        json!(["~", "/home/me/.shep"])
+    );
+    assert_eq!(once["filesystem"]["allowRead"], json!(["/work/api"]));
+
+    let twice = effective_settings(once.clone(), cwd, shep_home).expect("its own output parses");
+    assert_eq!(twice, once);
+}
+
+#[test]
+fn a_tables_own_deny_and_allow_entries_are_kept() {
+    let table_with_entries = table(json!({"filesystem": {
+        "denyRead": ["~/.ssh"],
+        "allowRead": ["~/.nvm"],
+    }}));
+
+    let settings = effective_settings(
+        table_with_entries,
+        Path::new("/work/api"),
+        Path::new("/home/me/.shep"),
+    )
+    .expect("a table with both lists parses");
+
+    assert_eq!(
+        settings["filesystem"]["denyRead"],
+        json!(["~/.ssh", "~", "/home/me/.shep"])
+    );
+    assert_eq!(
+        settings["filesystem"]["allowRead"],
+        json!(["~/.nvm", "/work/api"])
+    );
+}
+
+#[test]
+fn a_shep_home_outside_home_is_still_denied() {
+    let settings = effective_settings(
+        table(json!({})),
+        Path::new("/work/api"),
+        Path::new("/srv/shep"),
+    )
+    .expect("an empty table parses");
+
+    assert_eq!(
+        settings["filesystem"]["denyRead"],
+        json!(["~", "/srv/shep"])
+    );
+}
+
+#[test]
 fn the_effective_settings_carry_the_five_lists_crabpot_requires() {
-    let settings = effective_settings(table(json!({})), Path::new("/work/api")).expect("parses");
+    let settings = effective_settings(
+        table(json!({})),
+        Path::new("/work/api"),
+        Path::new(SHEP_HOME),
+    )
+    .expect("parses");
 
     assert_eq!(settings["network"]["allowedDomains"], json!([]));
     assert_eq!(settings["network"]["deniedDomains"], json!([]));
-    assert_eq!(settings["filesystem"]["denyRead"], json!([]));
     assert_eq!(settings["filesystem"]["denyWrite"], json!([]));
 }
 
@@ -90,6 +152,7 @@ fn every_refusal_maps_to_exit_125() {
         effective_settings(
             table(json!({"network": {"allowedDomains": ["*"]}})),
             Path::new("/work"),
+            Path::new(SHEP_HOME),
         )
         .expect_err("crabpot refuses a wildcard allow"),
         Refusal::Cwd(io::Error::other("gone")),
@@ -117,6 +180,7 @@ fn a_launch_that_succeeds_hands_the_run_the_settings_and_the_whole_command() {
     let refusal = launch(
         &args(),
         Path::new("/work/api"),
+        Path::new(SHEP_HOME),
         |sheep| {
             assert_eq!(sheep, "api");
             Ok(Some(table(
@@ -160,10 +224,16 @@ fn a_failure_before_the_run_never_reaches_the_command() {
     for (what, args, fetch) in cases {
         let reached = Cell::new(false);
 
-        let refusal = launch(&args, Path::new("/work/api"), fetch, |_plan| {
-            reached.set(true);
-            Refusal::Unsupported
-        });
+        let refusal = launch(
+            &args,
+            Path::new("/work/api"),
+            Path::new(SHEP_HOME),
+            fetch,
+            |_plan| {
+                reached.set(true);
+                Refusal::Unsupported
+            },
+        );
 
         assert!(!reached.get(), "{what}: the run was reached");
         assert_eq!(refusal.exit_code(), 125, "{what}: {refusal}");
