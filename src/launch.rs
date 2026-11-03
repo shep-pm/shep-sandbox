@@ -150,8 +150,9 @@ pub fn parse_args(args: &[OsString]) -> Result<Invocation, Refusal> {
 }
 
 /// `table` as crabpot will read it: the five required lists present, `cwd`
-/// in `filesystem.allowWrite` and, as a literal path, in `filesystem.allowRead`, `~` and `shep_home`
-/// in `filesystem.denyRead`, each once, and the whole checked against crabpot.
+/// in `filesystem.allowWrite` and, as a literal path, in
+/// `filesystem.allowRead`, `~` and `shep_home` in `filesystem.denyRead`, each
+/// once, and the whole checked against crabpot.
 ///
 /// A sheep reads nothing under home but its cwd until its own `allowRead`
 /// re-opens a path. `shep_home` stays hidden even then, because crabpot keeps
@@ -208,24 +209,34 @@ fn literal(path: &str) -> Value {
     serde_json::json!({"path": path, "literal": true})
 }
 
+/// What the shepherd answered a request for a sheep's table with.
+#[derive(Debug)]
+pub struct Fetched {
+    /// The shepherd's `$SHEP_HOME`, which no sheep may read.
+    pub shep_home: PathBuf,
+    /// The sheep's `[app.dogs.sandbox]` table, or `None` when it has none.
+    pub table: Option<Map<String, Value>>,
+}
+
 /// Everything `launch` does short of running the command.
 ///
-/// `fetch` asks for the sheep's table, and `execute` runs the plan. `execute`
+/// `fetch` resolves `$SHEP_HOME` and asks for the sheep's table, and only
+/// once the arguments parse. `execute` runs the plan. `execute`
 /// returns only when it could not, so the value returned is always a refusal.
 /// Nothing here runs the command except through `execute`.
 pub fn launch(
     args: &[OsString],
     cwd: &Path,
-    shep_home: &Path,
-    fetch: impl FnOnce(&str) -> Result<Option<Map<String, Value>>, Refusal>,
+    fetch: impl FnOnce(&str) -> Result<Fetched, Refusal>,
     execute: impl FnOnce(Plan) -> Refusal,
 ) -> Refusal {
     let plan = (|| {
         let Invocation { sheep, command } = parse_args(args)?;
-        let table = fetch(&sheep)?.ok_or_else(|| Refusal::NoTable {
+        let Fetched { shep_home, table } = fetch(&sheep)?;
+        let table = table.ok_or_else(|| Refusal::NoTable {
             sheep: sheep.clone(),
         })?;
-        let settings = effective_settings(table, cwd, shep_home)?;
+        let settings = effective_settings(table, cwd, &shep_home)?;
         Ok(Plan {
             sheep,
             cwd: cwd.to_owned(),
@@ -245,16 +256,9 @@ pub fn run(args: &[OsString]) -> ExitCode {
     let refusal = if cfg!(not(unix)) {
         Refusal::Unsupported
     } else {
-        match (std::env::current_dir(), shep_paths()) {
-            (Ok(cwd), Ok(paths)) => launch(
-                args,
-                &cwd,
-                &paths.home,
-                |sheep| fetch_table(&paths.socket, sheep),
-                execute,
-            ),
-            (Err(err), _) => Refusal::Cwd(err),
-            (_, Err(refusal)) => refusal,
+        match std::env::current_dir() {
+            Ok(cwd) => launch(args, &cwd, fetch_table, execute),
+            Err(err) => Refusal::Cwd(err),
         }
     };
     eprintln!("shep-sandbox: {refusal}");
@@ -274,16 +278,17 @@ fn shep_paths() -> Result<shep_client::shep_core::paths::ShepPaths, Refusal> {
     shep_client::dogs::resolve_paths(&|key| std::env::var_os(key)).map_err(Refusal::Home)
 }
 
-/// The sheep's `[app.dogs.sandbox]` table, asked of the shepherd at `socket`.
-/// The runtime that asks is gone when this returns.
-fn fetch_table(socket: &Path, sheep: &str) -> Result<Option<Map<String, Value>>, Refusal> {
+/// The sheep's `[app.dogs.sandbox]` table, asked of the shepherd `$SHEP_HOME`
+/// names. The runtime that asks is gone when this returns.
+fn fetch_table(sheep: &str) -> Result<Fetched, Refusal> {
+    let paths = shep_paths()?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(Refusal::Runtime)?;
     runtime
         .block_on(async {
-            let client = shep_client::Client::connect(socket)
+            let client = shep_client::Client::connect(&paths.socket)
                 .await
                 .map_err(ShepherdError::from)?;
             client
@@ -291,7 +296,10 @@ fn fetch_table(socket: &Path, sheep: &str) -> Result<Option<Map<String, Value>>,
                 .await
                 .map_err(ShepherdError::from)
         })
-        .map(|table| table.map(shep_client::shep_core::config::DogTable::into_map))
+        .map(|table| Fetched {
+            shep_home: paths.home,
+            table: table.map(shep_client::shep_core::config::DogTable::into_map),
+        })
         .map_err(Refusal::Shepherd)
 }
 

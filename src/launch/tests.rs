@@ -6,13 +6,20 @@ use shep_client::{
     dogs::{HomeError, ShepherdError},
 };
 
-use super::{Invocation, Plan, Refusal, effective_settings, launch, parse_args};
+use super::{Fetched, Invocation, Plan, Refusal, effective_settings, launch, parse_args};
 
 fn os(words: &[&str]) -> Vec<OsString> {
     words.iter().map(OsString::from).collect()
 }
 
 const SHEP_HOME: &str = "/home/me/.shep";
+
+fn fetched(table: Option<Map<String, Value>>) -> Result<Fetched, Refusal> {
+    Ok(Fetched {
+        shep_home: SHEP_HOME.into(),
+        table,
+    })
+}
 
 fn table(value: Value) -> Map<String, Value> {
     let Value::Object(table) = value else {
@@ -198,10 +205,9 @@ fn a_launch_that_succeeds_hands_the_run_the_settings_and_the_whole_command() {
     let refusal = launch(
         &args(),
         Path::new("/work/api"),
-        Path::new(SHEP_HOME),
         |sheep| {
             assert_eq!(sheep, "api");
-            Ok(Some(table(
+            fetched(Some(table(
                 json!({"network": {"allowedDomains": ["example.com"]}}),
             )))
         },
@@ -226,32 +232,28 @@ fn a_launch_that_succeeds_hands_the_run_the_settings_and_the_whole_command() {
 
 #[test]
 fn a_failure_before_the_run_never_reaches_the_command() {
-    type Fetch = fn(&str) -> Result<Option<Map<String, Value>>, Refusal>;
+    type Fetch = fn(&str) -> Result<Fetched, Refusal>;
     let cases: [(&str, Vec<OsString>, Fetch); 5] = [
-        ("no command", os(&["api", "--"]), |_| Ok(Some(Map::new()))),
+        ("no command", os(&["api", "--"]), |_| {
+            fetched(Some(Map::new()))
+        }),
         ("no shepherd", args(), |_| Err(Refusal::NoHome)),
-        ("no table", args(), |_| Ok(None)),
+        ("no table", args(), |_| fetched(None)),
         ("a table crabpot refuses", args(), |_| {
-            Ok(Some(table(json!({"network": "open"}))))
+            fetched(Some(table(json!({"network": "open"}))))
         }),
         ("a refused sheep", os(&["--", "node"]), |_| {
-            Ok(Some(Map::new()))
+            fetched(Some(Map::new()))
         }),
     ];
 
     for (what, args, fetch) in cases {
         let reached = Cell::new(false);
 
-        let refusal = launch(
-            &args,
-            Path::new("/work/api"),
-            Path::new(SHEP_HOME),
-            fetch,
-            |_plan| {
-                reached.set(true);
-                Refusal::Unsupported
-            },
-        );
+        let refusal = launch(&args, Path::new("/work/api"), fetch, |_plan| {
+            reached.set(true);
+            Refusal::Unsupported
+        });
 
         assert!(!reached.get(), "{what}: the run was reached");
         assert_eq!(refusal.exit_code(), 125, "{what}: {refusal}");
