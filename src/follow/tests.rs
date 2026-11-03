@@ -83,6 +83,8 @@ struct FakeShepherd {
     connects: VecDeque<Result<FakeSession, ShepherdError>>,
     connected_at: Vec<tokio::time::Instant>,
     asked: Rc<RefCell<Vec<String>>>,
+    /// Set for a connection that cannot be dialled again.
+    link_only: bool,
 }
 
 impl FakeShepherd {
@@ -113,6 +115,10 @@ impl Shepherd for FakeShepherd {
             None => std::future::pending().await,
         }
     }
+
+    fn redials(&self) -> bool {
+        !self.link_only
+    }
 }
 
 /// What the follower wrote, as text.
@@ -139,6 +145,30 @@ async fn followed(shepherd: &mut FakeShepherd, last: Map<String, Value>) -> Said
     )
     .await;
     assert!(finished.is_err(), "the follower returned on its own");
+    Said {
+        control: String::from_utf8(control).expect("UTF-8"),
+        log: String::from_utf8(log).expect("UTF-8"),
+    }
+}
+
+/// As [`followed`], for a shepherd the follower gives up on by itself.
+async fn followed_to_the_end(shepherd: &mut FakeShepherd, last: Map<String, Value>) -> Said {
+    let mut control = Vec::new();
+    let mut log = Vec::new();
+    timeout(
+        Duration::from_secs(3600),
+        follow(
+            shepherd,
+            "web",
+            Path::new(CWD),
+            Path::new(SHEP_HOME),
+            last,
+            &mut control,
+            &mut log,
+        ),
+    )
+    .await
+    .expect("the follower ends once the link is lost");
     Said {
         control: String::from_utf8(control).expect("UTF-8"),
         log: String::from_utf8(log).expect("UTF-8"),
@@ -368,4 +398,39 @@ async fn a_table_the_shepherd_keeps_refusing_is_retried_with_a_growing_wait() {
     // The connect after the last scripted one never answers, so it ends the run.
     let secs: Vec<u64> = waits.iter().map(Duration::as_secs).collect();
     assert_eq!(secs, [1, 2, 4, 8]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_lost_link_keeps_the_settings_and_says_a_restart_is_needed() {
+    let mut shepherd = FakeShepherd::with(FakeSession::default().table(json!({})).then_lost());
+    shepherd.link_only = true;
+    shepherd.then(
+        FakeSession::default().table(json!({"network": {"allowedDomains": ["example.com"]}})),
+    );
+
+    let said = followed_to_the_end(&mut shepherd, settings(json!({}))).await;
+
+    assert_eq!(said.control, "", "the settings in force are left alone");
+    assert_eq!(
+        said.log,
+        "shep-sandbox: web: lost the link to the shepherd, the next change to the table needs a restart of the sheep to apply\n"
+    );
+    assert_eq!(
+        shepherd.connected_at.len(),
+        1,
+        "the link is never dialled again"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_link_whose_table_cannot_be_read_is_not_dialled_again() {
+    let mut shepherd = FakeShepherd::with(FakeSession::default().table_fails());
+    shepherd.link_only = true;
+
+    let said = followed_to_the_end(&mut shepherd, settings(json!({}))).await;
+
+    assert_eq!(said.control, "");
+    assert!(said.log.contains("cannot read the table"), "{}", said.log);
+    assert!(said.log.contains("needs a restart"), "{}", said.log);
+    assert_eq!(shepherd.connected_at.len(), 1);
 }

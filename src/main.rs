@@ -13,6 +13,8 @@
 mod config;
 mod error;
 mod follow;
+#[cfg(unix)]
+mod inherit;
 mod launch;
 mod settings;
 

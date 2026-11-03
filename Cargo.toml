@@ -43,6 +43,10 @@ serde_json = { version = "1", default-features = false, features = ["std"] }
 tokio = { version = "1", default-features = false, features = ["rt", "macros", "time"] }
 # An unlinked file for the settings crabpot reads through `/dev/fd`.
 tempfile = { version = "3", default-features = false }
+# `fcntl(F_SETFD)` on the descriptor the shepherd handed down, so the sandboxed
+# command does not inherit it. rustix is already in the tree through tempfile.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 # Only to pause the clock in the follower's tests, so a reconnect wait costs
@@ -56,7 +60,9 @@ required-features = ["integration"]
 [lints.rust]
 missing_docs = "deny"
 missing_debug_implementations = "deny"
-unsafe_code = "forbid"
+# `deny`, not `forbid`: `src/inherit.rs` holds the two calls on the process's
+# own descriptors and environment that std marks `unsafe`.
+unsafe_code = "deny"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
