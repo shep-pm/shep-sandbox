@@ -15,12 +15,12 @@ use std::{
 
 use serde_json::{Map, Value};
 use shep_client::{
-    Client, EventStream, Lagged,
+    Client, ConnectError, EventStream, Lagged,
     dogs::ShepherdError,
     shep_core::{config::DogTable, protocol::BusEvent},
 };
 
-use crate::launch::effective_settings;
+use crate::{launch::effective_settings, link::Link};
 
 /// What the shepherd said, once the follower is subscribed.
 #[derive(Debug, PartialEq, Eq)]
@@ -49,6 +49,12 @@ pub trait Shepherd {
 
     /// Connects and subscribes.
     async fn connect(&mut self) -> Result<Self::Session, ShepherdError>;
+
+    /// Whether a connection that is lost can be made again. An inherited link
+    /// cannot: the shepherd handed it down once.
+    fn redials(&self) -> bool {
+        true
+    }
 }
 
 /// The keys crabpot swaps in a running sandbox.
@@ -57,6 +63,11 @@ const LIVE_KEYS: [&str; 3] = [
     "network.deniedDomains",
     "network.deniedResolvedAddresses",
 ];
+
+/// What the follower says when an inherited link is lost, as it cannot be
+/// made again.
+const LINK_LOST: &str = "lost the link to the shepherd, the next change to the table \
+                         needs a restart of the sheep to apply";
 
 /// The wait before the first reconnect, doubled for each one that fails.
 const FIRST_WAIT: Duration = Duration::from_secs(1);
@@ -69,7 +80,9 @@ const LONGEST_WAIT: Duration = Duration::from_secs(30);
 /// `last` is the settings the sandbox started with. A change to a network list
 /// goes to `control` as one JSON line, and everything else the follower has to
 /// say goes to `log`. A lost connection keeps the settings in force, and the
-/// follower reconnects with a growing wait.
+/// follower reconnects with a growing wait, unless the shepherd cannot be
+/// redialled, which ends the follower after one line saying that the next
+/// change needs a restart.
 pub async fn follow(
     shepherd: &mut impl Shepherd,
     sheep: &str,
@@ -93,6 +106,10 @@ pub async fn follow(
         match shepherd.connect().await {
             Ok(mut session) => match follower.session(&mut session).await {
                 Ended::Closed => return,
+                Ended::Lost | Ended::Unreadable if !shepherd.redials() => {
+                    follower.say(LINK_LOST);
+                    return;
+                }
                 Ended::Lost => {
                     wait = FIRST_WAIT;
                     follower
@@ -103,6 +120,12 @@ pub async fn follow(
                 // there, so a connection that works is no sign it is well.
                 Ended::Unreadable => {}
             },
+            // The link was handed down once and is gone, whatever it failed
+            // on: a connection made again would find nothing to take.
+            Err(_) if !shepherd.redials() => {
+                follower.say(LINK_LOST);
+                return;
+            }
             Err(err) if !reported => {
                 follower.say(&format!(
                     "cannot reach the shepherd ({err}), edits to the table wait until it is back"
@@ -280,32 +303,80 @@ fn leaves(settings: &Map<String, Value>) -> BTreeMap<String, &Value> {
     leaves
 }
 
-/// The shepherd behind a socket.
+/// A connection to the shepherd that `launch` asked for the table over.
 #[derive(Debug)]
-struct Socket(PathBuf);
+pub enum Connection {
+    /// The link the shepherd spawned `launch` holding.
+    Link(Link),
+    /// A dial of the shepherd's socket.
+    Socket(Client),
+}
+
+/// The connections to the shepherd: the one `launch` opened, then the socket
+/// when there is one to dial.
+#[derive(Debug)]
+struct Wire {
+    first: Option<Connection>,
+    socket: Option<PathBuf>,
+}
+
+/// The topic that carries the changes of this dog's tables.
+fn topic() -> String {
+    format!("config.sheep.{}", crate::DEFAULT_NAME)
+}
 
 /// A connection to the shepherd, subscribed to this dog's tables.
 #[derive(Debug)]
-struct Live {
-    client: Client,
-    events: EventStream,
+enum Live {
+    Link(Link),
+    Socket { client: Client, events: EventStream },
 }
 
-impl Shepherd for Socket {
+impl Live {
+    async fn subscribe(connection: Connection) -> Result<Self, ShepherdError> {
+        match connection {
+            Connection::Link(mut link) => {
+                link.subscribe(vec![topic()]).await?;
+                Ok(Self::Link(link))
+            }
+            Connection::Socket(client) => {
+                let events = client.subscribe(vec![topic()]).await?;
+                Ok(Self::Socket { client, events })
+            }
+        }
+    }
+}
+
+impl Shepherd for Wire {
     type Session = Live;
 
     async fn connect(&mut self) -> Result<Live, ShepherdError> {
-        let client = Client::connect(&self.0).await?;
-        let topic = format!("config.sheep.{}", crate::DEFAULT_NAME);
-        let events = client.subscribe(vec![topic]).await?;
-        Ok(Live { client, events })
+        let connection = match (self.first.take(), &self.socket) {
+            (Some(connection), _) => connection,
+            (None, Some(socket)) => Connection::Socket(Client::connect(socket).await?),
+            (None, None) => {
+                return Err(ConnectError::Io(io::Error::other(
+                    "the inherited link cannot be dialled again",
+                ))
+                .into());
+            }
+        };
+        Live::subscribe(connection).await
+    }
+
+    fn redials(&self) -> bool {
+        self.socket.is_some()
     }
 }
 
 impl Session for Live {
     async fn heard(&mut self) -> Option<Heard> {
         loop {
-            match self.events.next().await? {
+            let event = match self {
+                Self::Link(link) => Ok(link.event().await?),
+                Self::Socket { events, .. } => events.next().await?,
+            };
+            match event {
                 Ok(BusEvent::DogSheepSettingsChanged { sheep, .. }) => {
                     return Some(Heard::Sheep(sheep));
                 }
@@ -316,44 +387,65 @@ impl Session for Live {
     }
 
     async fn table(&mut self, sheep: &str) -> Result<Option<Map<String, Value>>, ShepherdError> {
-        let table = self
-            .client
-            .sheep_dog_table(sheep, crate::DEFAULT_NAME)
-            .await?;
+        let table = match self {
+            Self::Link(link) => link.sheep_dog_table(sheep, crate::DEFAULT_NAME).await?,
+            Self::Socket { client, .. } => {
+                client.sheep_dog_table(sheep, crate::DEFAULT_NAME).await?
+            }
+        };
         Ok(table.map(DogTable::into_map))
     }
 }
 
-/// Follows `sheep`'s table on a thread of its own, on the shepherd at
-/// `socket` whose home is `shep_home`, and writes the network lists to
-/// `control`. The thread ends with the process, or once `control` is closed.
+/// The connection `launch` fetched the table over, with the runtime that
+/// drives it, for the follower to take over.
+#[derive(Debug)]
+pub struct Held {
+    runtime: tokio::runtime::Runtime,
+    wire: Wire,
+}
+
+impl Held {
+    /// `connection` as the follower's first, on `runtime`, which spawned its
+    /// tasks. `socket` is where to dial once `connection` is lost, or `None`
+    /// for a connection that cannot be dialled again.
+    pub fn new(
+        runtime: tokio::runtime::Runtime,
+        connection: Connection,
+        socket: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            runtime,
+            wire: Wire {
+                first: Some(connection),
+                socket,
+            },
+        }
+    }
+}
+
+/// Follows `sheep`'s table on a thread of its own, over the connection `held`
+/// carries to the shepherd whose home is `shep_home`, and writes the network
+/// lists to `control`. The thread ends with the process, or once `control` is
+/// closed.
 ///
 /// # Errors
 ///
 /// Whatever starting the thread fails with.
 pub fn spawn(
-    socket: PathBuf,
-    shep_home: PathBuf,
+    held: Held,
     sheep: String,
     cwd: PathBuf,
+    shep_home: PathBuf,
     last: Map<String, Value>,
     mut control: PipeWriter,
 ) -> io::Result<()> {
     thread::Builder::new()
         .name("follow".into())
         .spawn(move || {
-            let runtime = match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(runtime) => runtime,
-                Err(err) => {
-                    eprintln!("shep-sandbox: {sheep}: cannot follow the table: {err}");
-                    return;
-                }
-            };
+            let Held { runtime, mut wire } = held;
             runtime.block_on(follow(
-                &mut Socket(socket),
+                &mut wire,
                 &sheep,
                 &cwd,
                 &shep_home,

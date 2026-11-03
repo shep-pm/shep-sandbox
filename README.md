@@ -28,6 +28,7 @@ name = "reactmap"
 script = "node"
 args = ["."]
 cwd = "~/ReactMap"
+user = "app1"
 env = { NODE_USE_ENV_PROXY = "1" }
 
 [app.dogs.sandbox.network]
@@ -61,7 +62,11 @@ shep set reactmap.dogs.sandbox.network.allowedDomains '["raw.githubusercontent.c
 - `network.allowedDomains`, `network.deniedDomains` and `network.deniedResolvedAddresses` apply at once, with no restart.
 - Any other key needs a restart. The sheep's err log says so, naming the key: `shep-sandbox: reactmap: filesystem.allowRead changed, restart the sheep to apply it`.
 - A table crabpot refuses is logged the same way, and the settings in force stay.
-- If the shepherd connection drops, the sandbox keeps its last lists while the dog reconnects.
+- If the shepherd connection drops, the sandbox keeps its last lists while the dog reconnects. Over the shepherd's launch link (see below) there is nothing to reconnect to: the err log says that the next change needs a restart, and the settings in force stay.
+
+## Running as another user
+
+A sheep with `user` set runs as that user, and the dog needs no access to the shepherd's control socket for it. The shepherd spawns `launch` holding a link to itself, named by `$SHEP_DOG_FD`. `launch` fetches the table and follows it over that link. The command never sees it: the descriptor is closed on exec and `SHEP_DOG_FD` is removed from the environment the command gets. `launch` holds no more authority than the one table it asks for.
 
 ## Platform notes
 
@@ -75,7 +80,7 @@ shep set reactmap.dogs.sandbox.network.allowedDomains '["raw.githubusercontent.c
 
 A refusal at launch exits 125 with one line on stderr naming the cause, and shep marks the sheep errored without restarting it. A refusal while the sheep runs is only logged, as above. A command crabpot never reached never runs: there is no fallback outside the sandbox.
 
-Do not let a sheep reach the shepherd's control socket. That socket trusts any process of the same user, so a sheep that connects to it holds the operator's authority over the whole flock. `network.allowAllUnixSockets`, or a `network.allowUnixSockets` entry that reaches `$SHEP_HOME/run/shep.sock`, grants exactly that.
+With a shepherd older than the launch link, `launch` dials the control socket instead. That socket trusts any process of the same user, so do not let such a sheep reach it: `network.allowAllUnixSockets`, or a `network.allowUnixSockets` entry that reaches `$SHEP_HOME/run/shep.sock`, grants the operator's authority over the whole flock.
 
 ## License
 

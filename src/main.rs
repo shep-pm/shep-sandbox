@@ -13,7 +13,10 @@
 mod config;
 mod error;
 mod follow;
+#[cfg(unix)]
+mod inherit;
 mod launch;
+mod link;
 mod settings;
 
 use std::{ffi::OsString, process::ExitCode};

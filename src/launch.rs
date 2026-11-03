@@ -14,9 +14,12 @@ use std::{
 };
 
 use serde_json::{Map, Value};
-use shep_client::dogs::{HomeError, ShepherdError};
+use shep_client::{
+    dogs::{HomeError, ShepherdError},
+    shep_core::dogs::DOG_LINK_FD_VAR,
+};
 
-use crate::{error::Error, settings};
+use crate::{error::Error, follow::Held, settings};
 
 /// The exit code for every refusal, which is crabpot's own for a command line
 /// or sandbox it refuses.
@@ -31,15 +34,20 @@ pub struct Invocation {
     pub command: Vec<OsString>,
 }
 
-/// What `launch` hands the sandbox: the settings and the command, both final.
+/// What `launch` hands the sandbox: the settings and the command, both final,
+/// and the connection to the shepherd, which the follower takes over.
 #[derive(Debug)]
-pub struct Plan {
+pub struct Plan<C> {
     /// The sheep the command runs as.
     pub sheep: String,
     /// The sheep's cwd, which `settings` makes writable.
     pub cwd: PathBuf,
     /// The settings document crabpot reads, with the sheep's cwd writable.
     pub settings: Map<String, Value>,
+    /// The shepherd's `$SHEP_HOME`.
+    pub shep_home: PathBuf,
+    /// The connection the table came over.
+    pub connection: C,
     /// The program and its arguments.
     pub command: Vec<OsString>,
 }
@@ -71,6 +79,8 @@ pub enum Refusal {
     SettingsFile(io::Error),
     /// The pipe that carries later edits to crabpot could not be made.
     ControlPipe(io::Error),
+    /// The shepherd's link could not be kept from the command.
+    Link(io::Error),
     /// The runtime that asks the shepherd could not start.
     Runtime(io::Error),
     /// This platform has no crabpot sandbox.
@@ -102,6 +112,7 @@ impl fmt::Display for Refusal {
             Self::Cwd(err) => write!(f, "cannot read the current directory: {err}"),
             Self::SettingsFile(err) => write!(f, "cannot write the settings file: {err}"),
             Self::ControlPipe(err) => write!(f, "cannot open the control pipe: {err}"),
+            Self::Link(err) => write!(f, "cannot keep the shepherd's link from the command: {err}"),
             Self::Runtime(err) => write!(f, "cannot start the runtime: {err}"),
             Self::Unsupported => f.write_str("launch is not supported on this platform"),
         }
@@ -117,6 +128,7 @@ impl core::error::Error for Refusal {
             Self::Cwd(err)
             | Self::SettingsFile(err)
             | Self::ControlPipe(err)
+            | Self::Link(err)
             | Self::Runtime(err) => Some(err),
             Self::NoSheep
             | Self::NoCommand
@@ -211,11 +223,13 @@ fn literal(path: &str) -> Value {
 
 /// What the shepherd answered a request for a sheep's table with.
 #[derive(Debug)]
-pub struct Fetched {
+pub struct Fetched<C> {
     /// The shepherd's `$SHEP_HOME`, which no sheep may read.
     pub shep_home: PathBuf,
     /// The sheep's `[app.dogs.sandbox]` table, or `None` when it has none.
     pub table: Option<Map<String, Value>>,
+    /// The connection the table came over, which stays open for the follower.
+    pub connection: C,
 }
 
 /// Everything `launch` does short of running the command.
@@ -224,15 +238,19 @@ pub struct Fetched {
 /// once the arguments parse. `execute` runs the plan. `execute`
 /// returns only when it could not, so the value returned is always a refusal.
 /// Nothing here runs the command except through `execute`.
-pub fn launch(
+pub fn launch<C>(
     args: &[OsString],
     cwd: &Path,
-    fetch: impl FnOnce(&str) -> Result<Fetched, Refusal>,
-    execute: impl FnOnce(Plan) -> Refusal,
+    fetch: impl FnOnce(&str) -> Result<Fetched<C>, Refusal>,
+    execute: impl FnOnce(Plan<C>) -> Refusal,
 ) -> Refusal {
     let plan = (|| {
         let Invocation { sheep, command } = parse_args(args)?;
-        let Fetched { shep_home, table } = fetch(&sheep)?;
+        let Fetched {
+            shep_home,
+            table,
+            connection,
+        } = fetch(&sheep)?;
         let table = table.ok_or_else(|| Refusal::NoTable {
             sheep: sheep.clone(),
         })?;
@@ -241,6 +259,8 @@ pub fn launch(
             sheep,
             cwd: cwd.to_owned(),
             settings,
+            shep_home,
+            connection,
             command,
         })
     })();
@@ -265,51 +285,41 @@ pub fn run(args: &[OsString]) -> ExitCode {
     ExitCode::from(refusal.exit_code())
 }
 
-/// The paths `$SHEP_HOME` names.
+/// Keeps the shepherd's link from the command. The descriptor `var` names is
+/// closed on exec and `var` leaves the environment crabpot hands the command.
+/// A launch that holds no link has nothing to withhold.
+///
+/// Call it before any other thread runs, as the environment is changed.
 ///
 /// # Errors
 ///
-/// [`Refusal::NoHome`] when it is unset, and [`Refusal::Home`] when it names no
-/// usable directory.
-fn shep_paths() -> Result<shep_client::shep_core::paths::ShepPaths, Refusal> {
-    if std::env::var_os("SHEP_HOME").is_none() {
-        return Err(Refusal::NoHome);
-    }
-    shep_client::dogs::resolve_paths(&|key| std::env::var_os(key)).map_err(Refusal::Home)
-}
-
-/// The sheep's `[app.dogs.sandbox]` table, asked of the shepherd `$SHEP_HOME`
-/// names. The runtime that asks is gone when this returns.
-fn fetch_table(sheep: &str) -> Result<Fetched, Refusal> {
-    let paths = shep_paths()?;
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(Refusal::Runtime)?;
-    runtime
-        .block_on(async {
-            let client = shep_client::Client::connect(&paths.socket)
-                .await
-                .map_err(ShepherdError::from)?;
-            client
-                .sheep_dog_table(sheep, crate::DEFAULT_NAME)
-                .await
-                .map_err(ShepherdError::from)
-        })
-        .map(|table| Fetched {
-            shep_home: paths.home,
-            table: table.map(shep_client::shep_core::config::DogTable::into_map),
-        })
-        .map_err(Refusal::Shepherd)
+/// Whatever `fcntl` fails with, and `InvalidData` when `var` is not a number.
+#[cfg(unix)]
+fn withhold_link(var: &str) -> io::Result<()> {
+    let Some(value) = std::env::var_os(var) else {
+        return Ok(());
+    };
+    let fd = value
+        .to_str()
+        .and_then(|value| value.parse::<i32>().ok())
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("{var} is not a number"))
+        })?;
+    crate::inherit::close_on_exec(fd)?;
+    crate::inherit::unset_var(var);
+    Ok(())
 }
 
 /// Writes the settings to an unlinked file and runs crabpot on it, which
 /// exits the process with the command's status. A thread follows the sheep's
 /// table meanwhile, and writes the network lists to crabpot's control pipe.
 #[cfg(unix)]
-fn execute(plan: Plan) -> Refusal {
+fn execute(plan: Plan<Held>) -> Refusal {
     use std::os::fd::AsRawFd;
 
+    if let Err(err) = withhold_link(DOG_LINK_FD_VAR) {
+        return Refusal::Link(err);
+    }
     let file = match settings_file(&plan.settings) {
         Ok(file) => file,
         Err(err) => return Refusal::SettingsFile(err),
@@ -326,7 +336,14 @@ fn execute(plan: Plan) -> Refusal {
         "--".into(),
     ];
     args.extend(plan.command);
-    follow_table(plan.sheep, plan.cwd, plan.settings, writer);
+    follow_table(
+        plan.connection,
+        plan.sheep,
+        plan.cwd,
+        plan.shep_home,
+        plan.settings,
+        writer,
+    );
     // `file` and `control` stay open until the process exits, because
     // `run_args` never returns.
     crabpot::run_args(args)
@@ -336,30 +353,22 @@ fn execute(plan: Plan) -> Refusal {
 /// it when it cannot start: the settings it starts with are final.
 #[cfg(unix)]
 fn follow_table(
+    connection: Held,
     sheep: String,
     cwd: PathBuf,
+    shep_home: PathBuf,
     settings: Map<String, Value>,
     control: std::io::PipeWriter,
 ) {
-    let started = match shep_paths() {
-        Ok(paths) => crate::follow::spawn(
-            paths.socket,
-            paths.home,
-            sheep.clone(),
-            cwd,
-            settings,
-            control,
-        )
-        .map_err(|err| err.to_string()),
-        Err(err) => Err(err.to_string()),
-    };
-    if let Err(err) = started {
+    if let Err(err) =
+        crate::follow::spawn(connection, sheep.clone(), cwd, shep_home, settings, control)
+    {
         eprintln!("shep-sandbox: {sheep}: edits to the table will not reach the sandbox: {err}");
     }
 }
 
 #[cfg(not(unix))]
-fn execute(_plan: Plan) -> Refusal {
+fn execute(_plan: Plan<Held>) -> Refusal {
     Refusal::Unsupported
 }
 
@@ -374,6 +383,12 @@ fn settings_file(settings: &Map<String, Value>) -> io::Result<std::fs::File> {
     file.rewind()?;
     Ok(file)
 }
+
+mod fetch;
+
+use fetch::fetch_table;
+#[cfg(test)]
+use fetch::{Reach, fetch_over};
 
 #[cfg(test)]
 mod tests;

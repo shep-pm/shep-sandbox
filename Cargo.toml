@@ -39,10 +39,15 @@ schemars = { version = "1.2.2", default-features = false, features = ["derive", 
 serde = { version = "1", default-features = false, features = ["derive"] }
 # Builds the settings document handed to crabpot.
 serde_json = { version = "1", default-features = false, features = ["std"] }
-# `time` is the wait between reconnects of the follower.
-tokio = { version = "1", default-features = false, features = ["rt", "macros", "time"] }
+# `time` is the wait between reconnects of the follower. `io-util` and `net`
+# are the launch link, which `src/link.rs` reads and writes by hand.
+tokio = { version = "1", default-features = false, features = ["rt", "macros", "time", "io-util", "net"] }
 # An unlinked file for the settings crabpot reads through `/dev/fd`.
 tempfile = { version = "3", default-features = false }
+# `fcntl(F_SETFD)` on the descriptor the shepherd handed down, so the sandboxed
+# command does not inherit it. rustix is already in the tree through tempfile.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 # Only to pause the clock in the follower's tests, so a reconnect wait costs
@@ -56,7 +61,9 @@ required-features = ["integration"]
 [lints.rust]
 missing_docs = "deny"
 missing_debug_implementations = "deny"
-unsafe_code = "forbid"
+# `deny`, not `forbid`: `src/inherit.rs` holds the two calls on the process's
+# own descriptors and environment that std marks `unsafe`.
+unsafe_code = "deny"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }

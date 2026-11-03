@@ -6,7 +6,10 @@ use shep_client::{
     dogs::{HomeError, ShepherdError},
 };
 
-use super::{Fetched, Invocation, Plan, Refusal, effective_settings, launch, parse_args};
+use super::{
+    Fetched, Invocation, Plan, Reach, Refusal, effective_settings, fetch_over, launch, parse_args,
+    withhold_link,
+};
 
 fn os(words: &[&str]) -> Vec<OsString> {
     words.iter().map(OsString::from).collect()
@@ -14,10 +17,11 @@ fn os(words: &[&str]) -> Vec<OsString> {
 
 const SHEP_HOME: &str = "/home/me/.shep";
 
-fn fetched(table: Option<Map<String, Value>>) -> Result<Fetched, Refusal> {
+fn fetched(table: Option<Map<String, Value>>) -> Result<Fetched<()>, Refusal> {
     Ok(Fetched {
         shep_home: SHEP_HOME.into(),
         table,
+        connection: (),
     })
 }
 
@@ -211,7 +215,7 @@ fn a_launch_that_succeeds_hands_the_run_the_settings_and_the_whole_command() {
                 json!({"network": {"allowedDomains": ["example.com"]}}),
             )))
         },
-        |plan: Plan| {
+        |plan: Plan<()>| {
             ran.set(Some(plan));
             Refusal::SettingsFile(io::Error::other("the stand-in returned"))
         },
@@ -232,7 +236,7 @@ fn a_launch_that_succeeds_hands_the_run_the_settings_and_the_whole_command() {
 
 #[test]
 fn a_failure_before_the_run_never_reaches_the_command() {
-    type Fetch = fn(&str) -> Result<Fetched, Refusal>;
+    type Fetch = fn(&str) -> Result<Fetched<()>, Refusal>;
     let cases: [(&str, Vec<OsString>, Fetch); 5] = [
         ("no command", os(&["api", "--"]), |_| {
             fetched(Some(Map::new()))
@@ -258,4 +262,139 @@ fn a_failure_before_the_run_never_reaches_the_command() {
         assert!(!reached.get(), "{what}: the run was reached");
         assert_eq!(refusal.exit_code(), 125, "{what}: {refusal}");
     }
+}
+
+/// A shepherd that records how it was reached and what was asked over each
+/// connection.
+#[derive(Default)]
+struct FakeReach {
+    reached: Vec<&'static str>,
+    asked: Vec<(&'static str, String)>,
+    link_fails: bool,
+}
+
+impl Reach for FakeReach {
+    type Conn = &'static str;
+
+    async fn over_link(&mut self) -> Result<&'static str, ShepherdError> {
+        self.reached.push("link");
+        if self.link_fails {
+            return Err(ShepherdError::from(ConnectError::HandshakeClosed));
+        }
+        Ok("link")
+    }
+
+    async fn over_socket(&mut self) -> Result<&'static str, ShepherdError> {
+        self.reached.push("socket");
+        Ok("socket")
+    }
+
+    async fn table(
+        &mut self,
+        conn: &mut &'static str,
+        sheep: &str,
+    ) -> Result<Option<Map<String, Value>>, ShepherdError> {
+        self.asked.push((*conn, sheep.to_owned()));
+        Ok(Some(Map::new()))
+    }
+}
+
+#[tokio::test]
+async fn a_launch_with_an_inherited_link_never_dials_the_socket() {
+    let mut reach = FakeReach::default();
+
+    let fetched = fetch_over(&mut reach, true, SHEP_HOME.into(), "api")
+        .await
+        .expect("the link answers");
+
+    assert_eq!(reach.reached, ["link"]);
+    assert_eq!(fetched.connection, "link");
+    assert_eq!(
+        reach.asked,
+        [("link", "api".to_owned())],
+        "the table came over the connection handed on"
+    );
+}
+
+#[tokio::test]
+async fn a_launch_without_a_link_dials_the_socket() {
+    let mut reach = FakeReach::default();
+
+    let fetched = fetch_over(&mut reach, false, SHEP_HOME.into(), "api")
+        .await
+        .expect("the socket answers");
+
+    assert_eq!(reach.reached, ["socket"]);
+    assert_eq!(fetched.connection, "socket");
+    assert_eq!(reach.asked, [("socket", "api".to_owned())]);
+}
+
+#[tokio::test]
+async fn a_link_that_fails_is_refused_and_not_retried_on_the_socket() {
+    let mut reach = FakeReach {
+        link_fails: true,
+        ..FakeReach::default()
+    };
+
+    let refusal = fetch_over(&mut reach, true, SHEP_HOME.into(), "api")
+        .await
+        .expect_err("the link is lost");
+
+    assert!(matches!(refusal, Refusal::Shepherd(_)), "{refusal}");
+    assert_eq!(reach.reached, ["link"]);
+    assert!(reach.asked.is_empty());
+}
+
+/// Whether a child of this process sees descriptor `fd` open and the variable
+/// `var` set, as `(fd open, var set)`.
+fn child_sees(fd: i32, var: &str) -> (bool, bool) {
+    let probe = |script: String| {
+        std::process::Command::new("sh")
+            .args(["-c", &script])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("sh runs")
+            .success()
+    };
+    (
+        probe(format!(": >&{fd}")),
+        probe(format!("[ -n \"${{{var}+set}}\" ]")),
+    )
+}
+
+/// `withhold_link` on a descriptor and a variable of this test's own, because
+/// a test binary cannot own fd 4 or `SHEP_DOG_FD`. That `execute` makes the
+/// call for the real ones is `tests/integration.rs`'s
+/// `the_sandboxed_command_holds_neither_fd_4_nor_shep_dog_fd`.
+#[test]
+#[allow(unsafe_code)] // Sets a variable only this test reads, as the shepherd would.
+fn a_withheld_link_is_closed_on_exec_and_its_variable_unset() {
+    use std::os::fd::AsRawFd;
+
+    const VAR: &str = "SHEP_SANDBOX_TEST_LINK_FD";
+    let (ours, _theirs) = std::os::unix::net::UnixStream::pair().expect("a socketpair");
+    let fd = ours.as_raw_fd();
+    // The shepherd hands the link down without close-on-exec, which std's
+    // sockets have by default.
+    rustix::io::fcntl_setfd(&ours, rustix::io::FdFlags::empty()).expect("clears the flag");
+    // SAFETY: nothing else in the test binary reads this variable.
+    unsafe { std::env::set_var(VAR, fd.to_string()) };
+    assert_eq!(
+        child_sees(fd, VAR),
+        (true, true),
+        "without it the child holds both, so the check below proves something"
+    );
+
+    withhold_link(VAR).expect("the descriptor is open");
+
+    assert_eq!(child_sees(fd, VAR), (false, false));
+    assert!(
+        ours.as_raw_fd() == fd && rustix::io::fcntl_getfd(&ours).is_ok(),
+        "this process keeps the link"
+    );
+}
+
+#[test]
+fn a_launch_without_a_link_has_nothing_to_withhold() {
+    withhold_link("SHEP_SANDBOX_TEST_UNSET_LINK_FD").expect("no variable, no descriptor");
 }
