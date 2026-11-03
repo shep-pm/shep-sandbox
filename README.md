@@ -37,13 +37,16 @@ publish = ["127.0.0.1:8080"]
 allowTcp = ["db.example.com:3306"]
 
 [app.dogs.sandbox.filesystem]
-denyRead = ["~/.ssh", "~/.shep"]
+# The toolchain lives under home, so re-open it.
+allowRead = ["~/.nvm"]
 ```
 
 The table takes crabpot's settings keys, spelled as crabpot spells them. `shep-sandbox --schema` serves crabpot's JSON Schema for them as `x-shep-sheep`, and `shep` checks a table against it before writing it.
 
 - The sheep's cwd is added to `filesystem.allowWrite`. Writes go only there, to the rest of `allowWrite` and to a temp folder.
-- Reads are open except for `denyRead`, so deny what the sheep has no business reading, such as other services' configs.
+- Reads under home are denied except the cwd. The dog adds `~` and `$SHEP_HOME` to `filesystem.denyRead` and the cwd to `filesystem.allowRead`, so a sheep cannot read other apps' configs, `.env` files or `$SHEP_HOME`'s Flockfile. Reads outside home are open.
+- Re-open what the sheep needs with `filesystem.allowRead`, such as a toolchain at `~/.nvm`. `allowRead = ["~"]` opens all of home, but `$SHEP_HOME` stays hidden, because crabpot keeps a `denyRead` entry that is more specific than the `allowRead` around it.
+- `denyRead` still takes your own entries, kept alongside the two the dog adds.
 - The five lists crabpot requires may be left out. The dog fills each with an empty list.
 - A key crabpot does not know is dropped, as crabpot drops it.
 
@@ -56,7 +59,7 @@ shep set reactmap.dogs.sandbox.network.allowedDomains '["raw.githubusercontent.c
 ```
 
 - `network.allowedDomains`, `network.deniedDomains` and `network.deniedResolvedAddresses` apply at once, with no restart.
-- Any other key needs a restart. The sheep's err log says so, naming the key: `shep-sandbox: reactmap: filesystem.denyRead changed, restart the sheep to apply it`.
+- Any other key needs a restart. The sheep's err log says so, naming the key: `shep-sandbox: reactmap: filesystem.allowRead changed, restart the sheep to apply it`.
 - A table crabpot refuses is logged the same way, and the settings in force stay.
 - If the shepherd connection drops, the sandbox keeps its last lists while the dog reconnects.
 

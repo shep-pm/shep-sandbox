@@ -64,6 +64,20 @@ fn a_launch_with_no_command_exits_125() {
 }
 
 #[test]
+#[cfg(unix)]
+fn a_launch_with_no_command_says_so_even_when_shep_home_is_unset() {
+    let (output, _) = launch(None, &["--"]);
+
+    assert_eq!(output.status.code(), Some(125), "{}", stderr(&output));
+    assert!(stderr(&output).contains("command"), "{}", stderr(&output));
+    assert!(
+        !stderr(&output).contains("SHEP_HOME"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
 #[cfg(not(unix))]
 fn launch_says_the_platform_is_not_supported() {
     let (output, ran) = launch(Some("/nonexistent/shep-home"), &["--", "touch"]);

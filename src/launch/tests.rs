@@ -6,10 +6,19 @@ use shep_client::{
     dogs::{HomeError, ShepherdError},
 };
 
-use super::{Invocation, Plan, Refusal, effective_settings, launch, parse_args};
+use super::{Fetched, Invocation, Plan, Refusal, effective_settings, launch, parse_args};
 
 fn os(words: &[&str]) -> Vec<OsString> {
     words.iter().map(OsString::from).collect()
+}
+
+const SHEP_HOME: &str = "/home/me/.shep";
+
+fn fetched(table: Option<Map<String, Value>>) -> Result<Fetched, Refusal> {
+    Ok(Fetched {
+        shep_home: SHEP_HOME.into(),
+        table,
+    })
 }
 
 fn table(value: Value) -> Map<String, Value> {
@@ -55,11 +64,13 @@ fn a_missing_sheep_name_is_refused() {
 fn the_cwd_is_added_to_allow_write_once() {
     let cwd = Path::new("/work/api");
 
-    let once = effective_settings(table(json!({})), cwd).expect("an empty table parses");
+    let once = effective_settings(table(json!({})), cwd, Path::new(SHEP_HOME))
+        .expect("an empty table parses");
     assert_eq!(once["filesystem"]["allowWrite"], json!(["/work/api"]));
 
     let already = table(json!({"filesystem": {"allowWrite": ["/var/cache", "/work/api"]}}));
-    let twice = effective_settings(already, cwd).expect("a table that already lists it");
+    let twice = effective_settings(already, cwd, Path::new(SHEP_HOME))
+        .expect("a table that already lists it");
     assert_eq!(
         twice["filesystem"]["allowWrite"],
         json!(["/var/cache", "/work/api"])
@@ -67,12 +78,88 @@ fn the_cwd_is_added_to_allow_write_once() {
 }
 
 #[test]
+fn home_and_shep_home_are_denied_and_the_cwd_re_opened_once() {
+    let (cwd, shep_home) = (Path::new("/work/api"), Path::new(SHEP_HOME));
+
+    let once = effective_settings(table(json!({})), cwd, shep_home).expect("an empty table parses");
+    assert_eq!(
+        once["filesystem"]["denyRead"],
+        json!(["~", "/home/me/.shep"])
+    );
+    assert_eq!(
+        once["filesystem"]["allowRead"],
+        json!([{"path": "/work/api", "literal": true}])
+    );
+
+    let twice = effective_settings(once.clone(), cwd, shep_home).expect("its own output parses");
+    assert_eq!(twice, once);
+}
+
+#[test]
+fn a_tables_own_deny_and_allow_entries_are_kept() {
+    let table_with_entries = table(json!({"filesystem": {
+        "denyRead": ["~/.ssh"],
+        "allowRead": ["~/.nvm"],
+    }}));
+
+    let settings = effective_settings(
+        table_with_entries,
+        Path::new("/work/api"),
+        Path::new("/home/me/.shep"),
+    )
+    .expect("a table with both lists parses");
+
+    assert_eq!(
+        settings["filesystem"]["denyRead"],
+        json!(["~/.ssh", "~", "/home/me/.shep"])
+    );
+    assert_eq!(
+        settings["filesystem"]["allowRead"],
+        json!(["~/.nvm", {"path": "/work/api", "literal": true}])
+    );
+}
+
+#[test]
+fn a_shep_home_outside_home_is_still_denied() {
+    let settings = effective_settings(
+        table(json!({})),
+        Path::new("/work/api"),
+        Path::new("/srv/shep"),
+    )
+    .expect("an empty table parses");
+
+    assert_eq!(
+        settings["filesystem"]["denyRead"],
+        json!(["~", "/srv/shep"])
+    );
+}
+
+#[test]
+fn a_cwd_with_glob_characters_is_re_opened_as_a_literal_path() {
+    let settings = effective_settings(
+        table(json!({})),
+        Path::new("/home/me/app[s]"),
+        Path::new(SHEP_HOME),
+    )
+    .expect("an empty table parses");
+
+    assert_eq!(
+        settings["filesystem"]["allowRead"],
+        json!([{"path": "/home/me/app[s]", "literal": true}])
+    );
+}
+
+#[test]
 fn the_effective_settings_carry_the_five_lists_crabpot_requires() {
-    let settings = effective_settings(table(json!({})), Path::new("/work/api")).expect("parses");
+    let settings = effective_settings(
+        table(json!({})),
+        Path::new("/work/api"),
+        Path::new(SHEP_HOME),
+    )
+    .expect("parses");
 
     assert_eq!(settings["network"]["allowedDomains"], json!([]));
     assert_eq!(settings["network"]["deniedDomains"], json!([]));
-    assert_eq!(settings["filesystem"]["denyRead"], json!([]));
     assert_eq!(settings["filesystem"]["denyWrite"], json!([]));
 }
 
@@ -90,6 +177,7 @@ fn every_refusal_maps_to_exit_125() {
         effective_settings(
             table(json!({"network": {"allowedDomains": ["*"]}})),
             Path::new("/work"),
+            Path::new(SHEP_HOME),
         )
         .expect_err("crabpot refuses a wildcard allow"),
         Refusal::Cwd(io::Error::other("gone")),
@@ -119,7 +207,7 @@ fn a_launch_that_succeeds_hands_the_run_the_settings_and_the_whole_command() {
         Path::new("/work/api"),
         |sheep| {
             assert_eq!(sheep, "api");
-            Ok(Some(table(
+            fetched(Some(table(
                 json!({"network": {"allowedDomains": ["example.com"]}}),
             )))
         },
@@ -144,16 +232,18 @@ fn a_launch_that_succeeds_hands_the_run_the_settings_and_the_whole_command() {
 
 #[test]
 fn a_failure_before_the_run_never_reaches_the_command() {
-    type Fetch = fn(&str) -> Result<Option<Map<String, Value>>, Refusal>;
+    type Fetch = fn(&str) -> Result<Fetched, Refusal>;
     let cases: [(&str, Vec<OsString>, Fetch); 5] = [
-        ("no command", os(&["api", "--"]), |_| Ok(Some(Map::new()))),
+        ("no command", os(&["api", "--"]), |_| {
+            fetched(Some(Map::new()))
+        }),
         ("no shepherd", args(), |_| Err(Refusal::NoHome)),
-        ("no table", args(), |_| Ok(None)),
+        ("no table", args(), |_| fetched(None)),
         ("a table crabpot refuses", args(), |_| {
-            Ok(Some(table(json!({"network": "open"}))))
+            fetched(Some(table(json!({"network": "open"}))))
         }),
         ("a refused sheep", os(&["--", "node"]), |_| {
-            Ok(Some(Map::new()))
+            fetched(Some(Map::new()))
         }),
     ];
 
