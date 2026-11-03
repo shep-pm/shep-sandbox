@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use serde_json::{Map, Value};
 use shep_client::{
-    ReconnectingClient,
-    dogs::{DogIdentity, ShepherdError},
+    Client,
+    dogs::ShepherdError,
     shep_core::{config::DogTable, dogs::DOG_LINK_FD_VAR, paths::ShepPaths},
 };
 
@@ -73,10 +73,9 @@ pub(super) async fn fetch_over<R: Reach>(
 /// The shepherd `$SHEP_HOME` names. The link the shepherd handed down is
 /// spoken by `src/link.rs`, because shep-client opens it only for a dog that
 /// then asks for its own section, which a launch link refuses. The socket is
-/// reached with the dog connection of `shep-client`.
+/// reached as it was before the link, with an anonymous `Client`.
 struct Wire {
     paths: ShepPaths,
-    identity: DogIdentity,
 }
 
 impl Reach for Wire {
@@ -96,7 +95,7 @@ impl Reach for Wire {
     }
 
     async fn over_socket(&mut self) -> Result<Connection, ShepherdError> {
-        let client = ReconnectingClient::connect_as(&self.paths.socket, &self.identity).await?;
+        let client = Client::connect(&self.paths.socket).await?;
         Ok(Connection::Socket(client))
     }
 
@@ -125,10 +124,8 @@ pub(super) fn fetch_table(sheep: &str) -> Result<Fetched<Held>, Refusal> {
         .enable_all()
         .build()
         .map_err(Refusal::Runtime)?;
-    let identity = DogIdentity::from_env(&|key| std::env::var(key).ok(), crate::DEFAULT_NAME);
     let mut wire = Wire {
         paths: paths.clone(),
-        identity,
     };
     let Fetched {
         shep_home,

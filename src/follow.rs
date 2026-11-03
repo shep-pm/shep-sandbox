@@ -15,7 +15,7 @@ use std::{
 
 use serde_json::{Map, Value};
 use shep_client::{
-    ConnectError, EventStream, Lagged, ReconnectingClient,
+    Client, ConnectError, EventStream, Lagged,
     dogs::ShepherdError,
     shep_core::{config::DogTable, protocol::BusEvent},
 };
@@ -309,7 +309,7 @@ pub enum Connection {
     /// The link the shepherd spawned `launch` holding.
     Link(Link),
     /// A dial of the shepherd's socket.
-    Socket(ReconnectingClient),
+    Socket(Client),
 }
 
 /// The connections to the shepherd: the one `launch` opened, then the socket
@@ -329,10 +329,7 @@ fn topic() -> String {
 #[derive(Debug)]
 enum Live {
     Link(Link),
-    Socket {
-        client: ReconnectingClient,
-        events: EventStream,
-    },
+    Socket { client: Client, events: EventStream },
 }
 
 impl Live {
@@ -356,7 +353,7 @@ impl Shepherd for Wire {
     async fn connect(&mut self) -> Result<Live, ShepherdError> {
         let connection = match (self.first.take(), &self.socket) {
             (Some(connection), _) => connection,
-            (None, Some(socket)) => Connection::Socket(ReconnectingClient::connect(socket).await?),
+            (None, Some(socket)) => Connection::Socket(Client::connect(socket).await?),
             (None, None) => {
                 return Err(ConnectError::Io(io::Error::other(
                     "the inherited link cannot be dialled again",
