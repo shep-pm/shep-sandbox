@@ -362,9 +362,13 @@ fn child_sees(fd: i32, var: &str) -> (bool, bool) {
     )
 }
 
+/// `withhold_link` on a descriptor and a variable of this test's own, because
+/// a test binary cannot own fd 4 or `SHEP_DOG_FD`. That `execute` makes the
+/// call for the real ones is `tests/integration.rs`'s
+/// `the_sandboxed_command_holds_neither_fd_4_nor_shep_dog_fd`.
 #[test]
 #[allow(unsafe_code)] // Sets a variable only this test reads, as the shepherd would.
-fn the_command_inherits_neither_fd_4_nor_shep_dog_fd() {
+fn a_withheld_link_is_closed_on_exec_and_its_variable_unset() {
     use std::os::fd::AsRawFd;
 
     const VAR: &str = "SHEP_SANDBOX_TEST_LINK_FD";

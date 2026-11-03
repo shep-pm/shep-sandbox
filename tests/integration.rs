@@ -350,6 +350,39 @@ fn the_sandboxed_command_cannot_connect_to_the_shepherds_control_socket() {
     assert_eq!(outside.status.code(), Some(0), "{outside:?}");
 }
 
+#[test]
+fn the_sandboxed_command_holds_neither_fd_4_nor_shep_dog_fd() {
+    let shepherd = Shepherd::new();
+    shepherd.boot();
+    shepherd.adopt_launch_dog();
+    let cwd = tempfile::tempdir().expect("the sheep's cwd");
+    // The shepherd hands `launch` its link as fd 4, named by `$SHEP_DOG_FD`.
+    // What the script sees is what crabpot started, so a `launch` that left
+    // either behind shows here. `done.txt` goes last, so the others are whole.
+    let script = script(
+        cwd.path(),
+        "run.sh",
+        "if (: <&4) 2>/dev/null; then echo open; else echo closed; fi > fd4.txt\n\
+         if [ -n \"${SHEP_DOG_FD+set}\" ]; then echo set; else echo unset; fi > var.txt\n\
+         echo done > done.txt",
+    );
+
+    let started = shepherd.start_boxed(cwd.path(), &script, "");
+
+    assert!(started.status.success(), "{started:?}");
+    assert_eq!(read_when_written(&cwd.path().join("done.txt")), "done\n");
+    assert_eq!(
+        fs::read_to_string(cwd.path().join("fd4.txt")).expect("fd4.txt"),
+        "closed\n",
+        "the command holds the shepherd's link"
+    );
+    assert_eq!(
+        fs::read_to_string(cwd.path().join("var.txt")).expect("var.txt"),
+        "unset\n",
+        "the command sees $SHEP_DOG_FD"
+    );
+}
+
 impl Shepherd {
     /// Replace one key of the `boxed` sheep's `[app.dogs.sandbox]` table
     /// while it runs.
