@@ -72,8 +72,8 @@ Re-open the checkout:
 
 ```toml
 [app.dogs.sandbox.filesystem]
-allowRead = ["/srv/apps/web"]
-allowWrite = ["/srv/apps/web"]
+allowRead = ["~/web"]
+allowWrite = ["~/web"]
 ```
 
 - `allowWrite` is needed only when the app writes a linked file, such as a database.
