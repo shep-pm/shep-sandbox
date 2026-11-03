@@ -25,6 +25,8 @@ pr_labels = ["release"]
 # `protect_breaking_commits` keeps) and must change with them. It exists so a
 # docs, test, ci, chore or style only merge opens no release pull request for
 # the no-op guard in release-plz-pr.yml to refuse, which turned main red.
+# A breaking change marked only by a `BREAKING CHANGE:` footer is not matched:
+# this repo marks one with `!` on the subject.
 release_commits = '^(feat|fix|perf|refactor)(\([^)]+\))?!?:|^[a-z]+(\([^)]+\))?!:'
 
 git_release_enable = true
