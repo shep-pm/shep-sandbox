@@ -64,6 +64,22 @@ shep set reactmap.dogs.sandbox.network.allowedDomains '["raw.githubusercontent.c
 - A table crabpot refuses is logged the same way, and the settings in force stay.
 - If the shepherd connection drops, the sandbox keeps its last lists while the dog reconnects. Over the shepherd's launch link (see below) there is nothing to reconnect to: the err log says that the next change needs a restart, and the settings in force stay.
 
+## Deploying with shep-deploy
+
+shep-deploy moves a sheep's cwd to `$SHEP_HOME/deploy/<sheep>/current` and symlinks every gitignored file of the original checkout (`.env`, a database, uploads) into each release. The checkout is under home, so the read-deny hides it. Tracked files still work, but the links fail with "no such file".
+
+Re-open the checkout:
+
+```toml
+[app.dogs.sandbox.filesystem]
+allowRead = ["/srv/apps/web"]
+allowWrite = ["/srv/apps/web"]
+```
+
+- `allowWrite` is needed only when the app writes a linked file, such as a database.
+- The dog does not re-open link targets on its own. The sheep can write its cwd, so a link it plants there would re-open whatever it names, `$SHEP_HOME` included, at its next restart.
+- shep refuses `listen` together with an `[app.dogs.sandbox]` table, so a sheep that takes its sockets from the shepherd cannot be sandboxed yet.
+
 ## Running as another user
 
 A sheep with `user` set runs as that user, and the dog needs no access to the shepherd's control socket for it. The shepherd spawns `launch` holding a link to itself, named by `$SHEP_DOG_FD`. `launch` fetches the table and follows it over that link. The command never sees it: the descriptor is closed on exec and `SHEP_DOG_FD` is removed from the environment the command gets. `launch` holds no more authority than the one table it asks for.
