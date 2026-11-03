@@ -165,7 +165,7 @@ async fn a_change_to_allowed_domains_is_sent_as_one_json_line() {
             "network": {"allowedDomains": ["example.com"], "deniedDomains": []},
             "filesystem": {
                 "denyRead": ["~", SHEP_HOME],
-                "allowRead": [CWD],
+                "allowRead": [{"path": CWD, "literal": true}],
                 "allowWrite": [CWD],
                 "denyWrite": [],
             },

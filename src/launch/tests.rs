@@ -79,7 +79,10 @@ fn home_and_shep_home_are_denied_and_the_cwd_re_opened_once() {
         once["filesystem"]["denyRead"],
         json!(["~", "/home/me/.shep"])
     );
-    assert_eq!(once["filesystem"]["allowRead"], json!(["/work/api"]));
+    assert_eq!(
+        once["filesystem"]["allowRead"],
+        json!([{"path": "/work/api", "literal": true}])
+    );
 
     let twice = effective_settings(once.clone(), cwd, shep_home).expect("its own output parses");
     assert_eq!(twice, once);
@@ -105,7 +108,7 @@ fn a_tables_own_deny_and_allow_entries_are_kept() {
     );
     assert_eq!(
         settings["filesystem"]["allowRead"],
-        json!(["~/.nvm", "/work/api"])
+        json!(["~/.nvm", {"path": "/work/api", "literal": true}])
     );
 }
 
@@ -121,6 +124,21 @@ fn a_shep_home_outside_home_is_still_denied() {
     assert_eq!(
         settings["filesystem"]["denyRead"],
         json!(["~", "/srv/shep"])
+    );
+}
+
+#[test]
+fn a_cwd_with_glob_characters_is_re_opened_as_a_literal_path() {
+    let settings = effective_settings(
+        table(json!({})),
+        Path::new("/home/me/app[s]"),
+        Path::new(SHEP_HOME),
+    )
+    .expect("an empty table parses");
+
+    assert_eq!(
+        settings["filesystem"]["allowRead"],
+        json!([{"path": "/home/me/app[s]", "literal": true}])
     );
 }
 

@@ -150,7 +150,7 @@ pub fn parse_args(args: &[OsString]) -> Result<Invocation, Refusal> {
 }
 
 /// `table` as crabpot will read it: the five required lists present, `cwd`
-/// in `filesystem.allowWrite` and `filesystem.allowRead`, `~` and `shep_home`
+/// in `filesystem.allowWrite` and, as a literal path, in `filesystem.allowRead`, `~` and `shep_home`
 /// in `filesystem.denyRead`, each once, and the whole checked against crabpot.
 ///
 /// A sheep reads nothing under home but its cwd until its own `allowRead`
@@ -178,10 +178,10 @@ pub fn effective_settings(
         .ok_or(Refusal::Home(HomeError::NotUtf8))?;
     let mut settings = settings::filled(&table);
     if let Some(Value::Object(filesystem)) = settings.get_mut("filesystem") {
-        add_once(filesystem, "allowWrite", cwd);
-        add_once(filesystem, "allowRead", cwd);
-        add_once(filesystem, "denyRead", "~");
-        add_once(filesystem, "denyRead", shep_home);
+        add_once(filesystem, "allowWrite", Value::from(cwd));
+        add_once(filesystem, "allowRead", literal(cwd));
+        add_once(filesystem, "denyRead", Value::from("~"));
+        add_once(filesystem, "denyRead", Value::from(shep_home));
     }
     settings::parse(&settings).map_err(Refusal::Settings)?;
     Ok(settings)
@@ -190,15 +190,22 @@ pub fn effective_settings(
 /// Appends `entry` to the list `key` of `filesystem` unless it is there. A
 /// missing list is made, and a `key` that is not a list is left for crabpot to
 /// refuse.
-fn add_once(filesystem: &mut Map<String, Value>, key: &str, entry: &str) {
+fn add_once(filesystem: &mut Map<String, Value>, key: &str, entry: Value) {
     let list = filesystem
         .entry(key)
         .or_insert_with(|| Value::Array(Vec::new()));
     if let Value::Array(list) = list
-        && !list.iter().any(|existing| existing == entry)
+        && !list.contains(&entry)
     {
-        list.push(Value::String(entry.to_owned()));
+        list.push(entry);
     }
+}
+
+/// `path` as an entry crabpot reads only as that name. A plain entry with
+/// `*`, `?`, `[` or `]` is also a pattern, which for an allow would open
+/// paths beside the cwd.
+fn literal(path: &str) -> Value {
+    serde_json::json!({"path": path, "literal": true})
 }
 
 /// Everything `launch` does short of running the command.
