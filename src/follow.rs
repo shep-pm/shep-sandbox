@@ -20,7 +20,7 @@ use shep_client::{
     shep_core::{config::DogTable, protocol::BusEvent},
 };
 
-use crate::launch::effective_settings;
+use crate::{launch::effective_settings, link::Link};
 
 /// What the shepherd said, once the follower is subscribed.
 #[derive(Debug, PartialEq, Eq)]
@@ -295,26 +295,50 @@ fn leaves(settings: &Map<String, Value>) -> BTreeMap<String, &Value> {
     leaves
 }
 
+/// A connection to the shepherd that `launch` asked for the table over.
+#[derive(Debug)]
+pub enum Connection {
+    /// The link the shepherd spawned `launch` holding.
+    Link(Link),
+    /// A dial of the shepherd's socket.
+    Socket(ReconnectingClient),
+}
+
 /// The connections to the shepherd: the one `launch` opened, then the socket
 /// when there is one to dial.
 #[derive(Debug)]
 struct Wire {
-    first: Option<ReconnectingClient>,
+    first: Option<Connection>,
     socket: Option<PathBuf>,
+}
+
+/// The topic that carries the changes of this dog's tables.
+fn topic() -> String {
+    format!("config.sheep.{}", crate::DEFAULT_NAME)
 }
 
 /// A connection to the shepherd, subscribed to this dog's tables.
 #[derive(Debug)]
-struct Live {
-    client: ReconnectingClient,
-    events: EventStream,
+enum Live {
+    Link(Link),
+    Socket {
+        client: ReconnectingClient,
+        events: EventStream,
+    },
 }
 
 impl Live {
-    async fn subscribe(client: ReconnectingClient) -> Result<Self, ShepherdError> {
-        let topic = format!("config.sheep.{}", crate::DEFAULT_NAME);
-        let events = client.subscribe(vec![topic]).await?;
-        Ok(Self { client, events })
+    async fn subscribe(connection: Connection) -> Result<Self, ShepherdError> {
+        match connection {
+            Connection::Link(mut link) => {
+                link.subscribe(vec![topic()]).await?;
+                Ok(Self::Link(link))
+            }
+            Connection::Socket(client) => {
+                let events = client.subscribe(vec![topic()]).await?;
+                Ok(Self::Socket { client, events })
+            }
+        }
     }
 }
 
@@ -322,9 +346,9 @@ impl Shepherd for Wire {
     type Session = Live;
 
     async fn connect(&mut self) -> Result<Live, ShepherdError> {
-        let client = match (self.first.take(), &self.socket) {
-            (Some(client), _) => client,
-            (None, Some(socket)) => ReconnectingClient::connect(socket).await?,
+        let connection = match (self.first.take(), &self.socket) {
+            (Some(connection), _) => connection,
+            (None, Some(socket)) => Connection::Socket(ReconnectingClient::connect(socket).await?),
             (None, None) => {
                 return Err(ConnectError::Io(io::Error::other(
                     "the inherited link cannot be dialled again",
@@ -332,7 +356,7 @@ impl Shepherd for Wire {
                 .into());
             }
         };
-        Live::subscribe(client).await
+        Live::subscribe(connection).await
     }
 
     fn redials(&self) -> bool {
@@ -343,7 +367,11 @@ impl Shepherd for Wire {
 impl Session for Live {
     async fn heard(&mut self) -> Option<Heard> {
         loop {
-            match self.events.next().await? {
+            let event = match self {
+                Self::Link(link) => Ok(link.event().await?),
+                Self::Socket { events, .. } => events.next().await?,
+            };
+            match event {
                 Ok(BusEvent::DogSheepSettingsChanged { sheep, .. }) => {
                     return Some(Heard::Sheep(sheep));
                 }
@@ -354,10 +382,12 @@ impl Session for Live {
     }
 
     async fn table(&mut self, sheep: &str) -> Result<Option<Map<String, Value>>, ShepherdError> {
-        let table = self
-            .client
-            .sheep_dog_table(sheep, crate::DEFAULT_NAME)
-            .await?;
+        let table = match self {
+            Self::Link(link) => link.sheep_dog_table(sheep, crate::DEFAULT_NAME).await?,
+            Self::Socket { client, .. } => {
+                client.sheep_dog_table(sheep, crate::DEFAULT_NAME).await?
+            }
+        };
         Ok(table.map(DogTable::into_map))
     }
 }
@@ -371,18 +401,18 @@ pub struct Held {
 }
 
 impl Held {
-    /// `client` as the follower's first connection, on `runtime`, which spawned
-    /// its tasks. `socket` is where to dial once `client` is lost, or `None`
+    /// `connection` as the follower's first, on `runtime`, which spawned its
+    /// tasks. `socket` is where to dial once `connection` is lost, or `None`
     /// for a connection that cannot be dialled again.
     pub fn new(
         runtime: tokio::runtime::Runtime,
-        client: ReconnectingClient,
+        connection: Connection,
         socket: Option<PathBuf>,
     ) -> Self {
         Self {
             runtime,
             wire: Wire {
-                first: Some(client),
+                first: Some(connection),
                 socket,
             },
         }

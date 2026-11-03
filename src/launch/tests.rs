@@ -291,10 +291,10 @@ impl Reach for FakeReach {
 
     async fn table(
         &mut self,
-        conn: &&'static str,
+        conn: &mut &'static str,
         sheep: &str,
     ) -> Result<Option<Map<String, Value>>, ShepherdError> {
-        self.asked.push((conn, sheep.to_owned()));
+        self.asked.push((*conn, sheep.to_owned()));
         Ok(Some(Map::new()))
     }
 }

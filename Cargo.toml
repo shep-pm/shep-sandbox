@@ -39,8 +39,9 @@ schemars = { version = "1.2.2", default-features = false, features = ["derive", 
 serde = { version = "1", default-features = false, features = ["derive"] }
 # Builds the settings document handed to crabpot.
 serde_json = { version = "1", default-features = false, features = ["std"] }
-# `time` is the wait between reconnects of the follower.
-tokio = { version = "1", default-features = false, features = ["rt", "macros", "time"] }
+# `time` is the wait between reconnects of the follower. `io-util` and `net`
+# are the launch link, which `src/link.rs` reads and writes by hand.
+tokio = { version = "1", default-features = false, features = ["rt", "macros", "time", "io-util", "net"] }
 # An unlinked file for the settings crabpot reads through `/dev/fd`.
 tempfile = { version = "3", default-features = false }
 # `fcntl(F_SETFD)` on the descriptor the shepherd handed down, so the sandboxed

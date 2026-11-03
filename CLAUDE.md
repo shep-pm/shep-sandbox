@@ -16,7 +16,7 @@ So far it is an adoptable dog and `launch`. `shep-sandbox launch <sheep> -- <cmd
 
 ## Where things live
 
-- `src/main.rs`: `crabpot::run_from_args()` first (the Linux sandbox re-enters this binary), the probes, the `launch` route and the idle loop. `src/launch.rs` is `launch`, `src/follow.rs` the thread it starts that follows the sheep's table and feeds crabpot's control pipe. `src/config.rs` is the `[sandbox]` section, `src/settings.rs` a sheep's table, which crabpot's `Config` parses and whose schema the dog serves, `src/error.rs` what stops the dog, `src/inherit.rs` the two `unsafe` calls that keep the shepherd's link from the sandboxed command.
+- `src/main.rs`: `crabpot::run_from_args()` first (the Linux sandbox re-enters this binary), the probes, the `launch` route and the idle loop. `src/launch.rs` is `launch` (`src/launch/fetch.rs` reaches the shepherd), `src/link.rs` the shepherd's launch link, which the dog speaks by hand because shep-client's `DogRuntime::start` asks the link for the dog's own section and a launch link refuses that, `src/follow.rs` the thread it starts that follows the sheep's table and feeds crabpot's control pipe. `src/config.rs` is the `[sandbox]` section, `src/settings.rs` a sheep's table, which crabpot's `Config` parses and whose schema the dog serves, `src/error.rs` what stops the dog, `src/inherit.rs` the two `unsafe` calls that keep the shepherd's link from the sandboxed command.
 - `tests/probe.rs` runs the binary with shep's probe flags. `tests/integration.rs` needs a built shep.
 - `docs/design-notes.md`: the discussion that started the effort. Decisions after it live on the map's tickets, not here.
 
