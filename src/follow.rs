@@ -64,6 +64,11 @@ const LIVE_KEYS: [&str; 3] = [
     "network.deniedResolvedAddresses",
 ];
 
+/// What the follower says when an inherited link is lost, as it cannot be
+/// made again.
+const LINK_LOST: &str = "lost the link to the shepherd, the next change to the table \
+                         needs a restart of the sheep to apply";
+
 /// The wait before the first reconnect, doubled for each one that fails.
 const FIRST_WAIT: Duration = Duration::from_secs(1);
 
@@ -102,10 +107,7 @@ pub async fn follow(
             Ok(mut session) => match follower.session(&mut session).await {
                 Ended::Closed => return,
                 Ended::Lost | Ended::Unreadable if !shepherd.redials() => {
-                    follower.say(
-                        "lost the link to the shepherd, the next change to the table \
-                         needs a restart of the sheep to apply",
-                    );
+                    follower.say(LINK_LOST);
                     return;
                 }
                 Ended::Lost => {
@@ -118,6 +120,12 @@ pub async fn follow(
                 // there, so a connection that works is no sign it is well.
                 Ended::Unreadable => {}
             },
+            // The link was handed down once and is gone, whatever it failed
+            // on: a connection made again would find nothing to take.
+            Err(_) if !shepherd.redials() => {
+                follower.say(LINK_LOST);
+                return;
+            }
             Err(err) if !reported => {
                 follower.say(&format!(
                     "cannot reach the shepherd ({err}), edits to the table wait until it is back"

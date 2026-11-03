@@ -434,3 +434,21 @@ async fn a_link_whose_table_cannot_be_read_is_not_dialled_again() {
     assert!(said.log.contains("needs a restart"), "{}", said.log);
     assert_eq!(shepherd.connected_at.len(), 1);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_link_that_cannot_be_subscribed_says_a_restart_is_needed_and_is_not_retried() {
+    let mut shepherd = FakeShepherd::default();
+    shepherd.link_only = true;
+    shepherd.then_unreachable();
+
+    let said = followed_to_the_end(&mut shepherd, settings(json!({}))).await;
+
+    assert_eq!(said.control, "");
+    assert!(said.log.contains("needs a restart"), "{}", said.log);
+    assert!(!said.log.contains("wait until it is back"), "{}", said.log);
+    assert_eq!(
+        shepherd.connected_at.len(),
+        1,
+        "a link that failed is never connected again"
+    );
+}
