@@ -22,7 +22,7 @@ mod settings;
 use std::{ffi::OsString, process::ExitCode};
 
 use shep_client::{
-    dogs::{self, DogAction, DogIdentity, DogRuntime, Probe, Stop, validate_answer},
+    dogs::{self, DogAction, DogIdentity, DogRuntime, Probe, Stop, Verb, validate_answer},
     shep_core::dogs::{DOG_LINK_FD_VAR, DOG_LINK_PIPE_VAR, validate::VALIDATE_ACTION},
 };
 
@@ -39,6 +39,7 @@ fn main() -> ExitCode {
     crabpot::run_from_args();
 
     Probe::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
+        .verb(Verb::new("Run a sheep inside a crabpot sandbox"))
         .ask_for_channel()
         .validate()
         .launch()
