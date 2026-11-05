@@ -63,15 +63,14 @@ fn the_schema_answer_is_json_for_a_section_with_no_keys() {
 }
 
 #[test]
-fn the_manifest_declares_no_verb() {
+fn the_manifest_describes_the_dog_and_offers_no_subcommand() {
     let output = run(&[MANIFEST_FLAG]);
 
     assert!(output.status.success());
     let manifest: serde_json::Value = serde_json::from_str(&stdout(&output)).expect("JSON");
-    assert!(
-        manifest.get("verb").is_none_or(|verb| verb.is_null()),
-        "{manifest}"
-    );
+    let verb = &manifest["verb"];
+    assert!(verb["description"].is_string(), "{manifest}");
+    assert!(verb.get("subcommands").is_none(), "{manifest}");
 }
 
 #[test]
