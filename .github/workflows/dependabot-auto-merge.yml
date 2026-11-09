@@ -16,6 +16,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # The runner hands a dependabot-triggered job Dependabot secrets and
+      # nothing else, so a secret set only as an Actions one reaches gh as an
+      # empty GH_TOKEN and gh exits 4 blaming Actions configuration.
+      - name: Refuse to queue a merge without the release PAT
+        if: ${{ secrets.RELEASE_PLZ_TOKEN == '' }}
+        run: |
+          echo "::error::RELEASE_PLZ_TOKEN is empty in this job, so no merge can be queued under the release PAT. Set it in the Dependabot scope too: gh secret set RELEASE_PLZ_TOKEN --app dependabot"
+          exit 1
+
       - name: Enable auto-merge
         env:
           # The PAT, not GITHUB_TOKEN: a merge made with GITHUB_TOKEN starts no
