@@ -31,9 +31,9 @@ crabpot = { version = "0.10.8", default-features = false, features = ["schema"] 
 # whose `Probe` declares `launch`. 0.23.0 is the shep this dog is tested
 # against, the first that refuses the old `sandbox` key.
 # `schema` answers `--schema`.
-shep-client = { version = "0.24.2", default-features = false, features = ["schema"] }
+shep-client = { version = "0.25.0", default-features = false, features = ["schema"] }
 # The version shep-client pins. `client` is what `serve` and `on_action` need.
-shep-channel = { version = "0.24.2", default-features = false, features = ["client"] }
+shep-channel = { version = "0.25.0", default-features = false, features = ["client"] }
 # `#[derive(JsonSchema)]` expands to absolute `schemars::` paths, so the crate
 # has to be nameable here even though shep-client already carries it.
 schemars = { version = "1.2.2", default-features = false, features = ["derive", "std"] }
